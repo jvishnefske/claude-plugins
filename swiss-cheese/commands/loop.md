@@ -2,65 +2,98 @@
 description: Start iterative refinement loop until all gates pass
 ---
 
-You are starting the Swiss Cheese iterative refinement loop. This will continuously run gates and fix issues until all 9 layers pass.
+You are starting the Swiss Cheese orchestrated execution loop. This uses **concurrent task execution** with topological sorting to maximize parallelism while respecting dependencies.
 
-## Loop Algorithm
+## Orchestrated Loop Algorithm
 
 ```
-while not all_gates_passed:
-    for gate in [requirements, architecture, tdd, implementation,
-                 static-analysis, formal-verification, dynamic-analysis,
-                 review, safety-case]:
+while not all_tasks_passed:
+    # Get all tasks with satisfied dependencies (can run in parallel)
+    ready_tasks = topological_sort(pending_tasks)
 
-        if gate in skipped_gates:
-            continue
+    # Dispatch up to max_parallel_agents concurrently
+    for task in ready_tasks[:max_parallel]:
+        worktree = create_worktree(task.branch)
+        spawn_subagent(task, worktree)
 
-        if gate not in passed_gates:
-            result = run_gate(gate)
+    # Wait for batch completion
+    await all_subagents_complete()
 
-            if result == PASS:
-                passed_gates.add(gate)
+    # Validate each task
+    for task in current_batch:
+        if validators_pass(task):
+            task.status = PASSED
+            completed_branches.append(task.branch)
+        else:
+            task.iteration += 1
+            if task.iteration < max_iterations:
+                task.status = PENDING  # Retry
             else:
-                fix_issues(result.issues)
-                # Loop will retry this gate
-                break  # Start over to catch regressions
+                task.status = FAILED
 ```
 
 ## Execution Rules
 
-1. **Sequential Gates**: Run gates in order (requirements → safety-case)
-2. **Fix Before Proceed**: Don't skip to next gate if current fails
-3. **Regression Detection**: If a file changes, re-run affected gates
-4. **User Checkpoints**: Pause for user input at critical decisions
-5. **Timeout**: Stop after 50 iterations to prevent infinite loops
+1. **Parallel Execution**: Tasks without interdependencies run concurrently in separate worktrees
+2. **Topological Order**: Dependencies are respected via graph sorting
+3. **Auto-Retry**: Failed tasks retry automatically (up to max_iterations)
+4. **Validation Gates**: Validators run after each task completion
+5. **Branch Isolation**: Each task works in its own git branch
+6. **Linear Rebase**: Completed branches are rebased in dependency order
 
-## Gate Dependencies
+## Task Dependencies (Example)
 
 ```
-requirements ──→ architecture ──→ tdd ──→ implementation ──┬──→ static-analysis
-                                                           ├──→ formal-verification
-                                                           └──→ dynamic-analysis
-                                                                      ↓
-                                                                   review
-                                                                      ↓
-                                                                 safety-case
+parse_requirements ──→ formalize_constraints ──→ design_modules ──→ define_interfaces
+                                                                           │
+                                    ┌──────────────────────────────────────┼──────────────────┐
+                                    ↓                                      ↓                  ↓
+                            write_unit_tests                    write_property_tests   write_integration_tests
+                                    │                                      │                  │
+                                    └──────────────────┬───────────────────┘                  │
+                                                       ↓                                      │
+                                               implement_core ←───────────────────────────────┘
+                                                       │
+                    ┌──────────────────────────────────┼──────────────────────────────────────┐
+                    ↓                                  ↓                                      ↓
+               run_clippy                          run_miri                            run_kani
+               run_audit                       measure_coverage
+               run_deny                         run_fuzzing
+                    │                                  │                                      │
+                    └──────────────────────────────────┼──────────────────────────────────────┘
+                                                       ↓
+                                              independent_review
+                                                       ↓
+                                             assemble_safety_case
 ```
 
 ## Starting the Loop
 
-1. Read current state from `/tmp/swiss_cheese_state.json`
-2. Identify first unpassed gate
-3. Run that gate using the gate agent
-4. If passes, continue to next
-5. If fails, fix issues and retry
-6. Continue until all gates pass or user cancels with `/swiss-cheese:cancel`
+1. Check orchestrator status:
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py status
+   ```
+
+2. The orchestrator dispatches ready tasks automatically via hooks
+
+3. For manual dispatch, signal readiness and the `UserPromptSubmit` hook will dispatch
+
+4. Monitor progress with `/swiss-cheese:status`
+
+5. Cancel with `/swiss-cheese:cancel`
 
 ## Progress Tracking
 
-After each gate attempt, update the state file and report:
-- Current gate being processed
-- Pass/fail status
-- Issues found (if any)
-- Estimated progress
+The orchestrator tracks:
+- Task status (pending, running, validating, passed, failed)
+- Current batch of concurrent tasks
+- Validation errors for retries
+- Completed branches ready for rebase
 
-Begin the loop now. Start with the first unpassed gate.
+## Completion
+
+When all tasks pass:
+1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py rebase` to merge branches
+2. Or manually rebase: branches are in `.worktrees/` directory
+
+Begin the orchestrated loop now. The hooks will automatically dispatch tasks as you work.

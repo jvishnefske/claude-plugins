@@ -2,48 +2,71 @@
 description: Show current verification status across all layers
 ---
 
-Read the Swiss Cheese session state from `/tmp/swiss_cheese_state.json` and display a comprehensive status report.
+Display the current Swiss Cheese orchestration status by querying the orchestrator.
+
+## Get Status
+
+Run the orchestrator status command:
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py status
+```
 
 ## Status Report Format
 
 ```
-Swiss Cheese Verification Status
-================================
+Swiss Cheese Orchestration Status
+=================================
 
-Project: <project_dir or "Not initialized">
-Started: <started_at or "N/A">
+Design Document: design.toml
+Status Counts:
+  - pending: 5
+  - running: 2
+  - passed: 8
+  - failed: 0
 
+Tasks:
+  [PASSED]  parse_requirements (requirements) - swiss-cheese/parse_requirements
+  [PASSED]  formalize_constraints (requirements) - swiss-cheese/formalize_constraints
+  [RUNNING] write_unit_tests (tdd) - swiss-cheese/write_unit_tests
+  [RUNNING] write_property_tests (tdd) - swiss-cheese/write_property_tests  <- parallel
+  [PENDING] implement_core (implementation) - waiting on tests
+  ...
+
+Current Batch (running concurrently):
+  - write_unit_tests
+  - write_property_tests
+
+Completed Branches (ready for rebase):
+  - swiss-cheese/parse_requirements
+  - swiss-cheese/formalize_constraints
+
+Next: Tasks will dispatch automatically when dependencies complete.
+```
+
+## Legacy Status
+
+For backward compatibility, also check `/tmp/swiss_cheese_state.json` for layer-based status:
+
+```
 Verification Layers:
 [x] Layer 1: Requirements     - PASSED
 [x] Layer 2: Architecture     - PASSED
 [x] Layer 3: TDD              - PASSED
 [ ] Layer 4: Implementation   - PENDING  <-- Current
-[ ] Layer 5: Static Analysis  - PENDING
-[ ] Layer 6: Formal Verify    - SKIPPED (no unsafe code)
-[ ] Layer 7: Dynamic Analysis - PENDING
-[ ] Layer 8: Review           - PENDING
-[ ] Layer 9: Safety Case      - PENDING
-
-Progress: 3/9 gates passed (33%)
-
-Modified Files (X total):
-  - src/lib.rs
-  - src/module.rs
-  ...
-
-CI Runs This Session:
-  - cargo test (tdd)
-  - cargo clippy (static-analysis)
-
-Next Steps:
-  1. Run: /swiss-cheese:gate implementation
-  2. Or continue with: /swiss-cheese:loop
+...
 ```
 
 ## Instructions
 
-1. Read `/tmp/swiss_cheese_state.json`
-2. If file doesn't exist, show "No active Swiss Cheese session. Start with /swiss-cheese"
-3. Format and display the status report
-4. Identify the next gate to run
-5. Provide actionable next steps
+1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py status` for task-level status
+2. Parse and display the JSON output in a readable format
+3. Show which tasks are running concurrently
+4. Identify tasks ready to run next (dependencies satisfied)
+5. Show any validation errors from failed tasks
+
+## Next Steps
+
+Based on status, suggest:
+- If tasks pending: "Tasks will dispatch automatically, or run `/swiss-cheese:loop`"
+- If tasks failed: "Review validation errors and fix issues"
+- If all passed: "Ready to rebase with `/swiss-cheese:rebase`"

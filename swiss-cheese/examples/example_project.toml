@@ -1,12 +1,22 @@
 # Swiss Cheese Model - Software Design Document
 # This TOML file defines verification layers, tasks, and dependencies
-# for production Rust development.
+# for production Rust development with concurrent task orchestration.
+#
+# Usage:
+# 1. Copy this file to your project root as `design.toml` or `swiss-cheese.toml`
+# 2. Customize layers, tasks, and validators for your project
+# 3. Run `/swiss-cheese:swiss-cheese design.toml` to start
+# 4. The orchestrator will spawn concurrent subagents in git worktrees
 
 [project]
 name = "example-production-system"
 version = "0.1.0"
 language = "rust"
 description = "Example project demonstrating Swiss Cheese verification model"
+
+# Orchestration settings
+max_iterations = 5          # Max retries per task before failing
+max_parallel_agents = 4     # Max concurrent subagents (worktrees)
 
 # Rust toolchain requirements
 [project.toolchain]
@@ -26,7 +36,7 @@ cpp = { standard = "c++17", checker = "clang-tidy", checks = ["hicpp-*", "modern
 name = "Requirements Formalization"
 description = "Formalize requirements with Rust-specific constraints"
 order = 1
-gate = "gates/requirements_gate.sh"
+validators = []  # No automated validators - human review
 reports = ["json", "html"]
 
 [layers.architecture]
@@ -34,7 +44,7 @@ name = "Architecture Design"
 description = "Design type-safe, ownership-correct architecture"
 order = 2
 depends_on = ["requirements"]
-gate = "gates/architecture_gate.sh"
+validators = []  # No automated validators - human review
 reports = ["json"]
 
 [layers.tdd]
@@ -42,15 +52,15 @@ name = "Test-Driven Development"
 description = "Write comprehensive tests BEFORE implementation"
 order = 3
 depends_on = ["architecture"]
-gate = "gates/tdd_gate.sh"
-reports = ["json", "xml"]  # XML for CI integration
+validators = ["cargo_test"]  # Tests must compile (but may fail - TDD)
+reports = ["json", "xml"]
 
 [layers.implementation]
 name = "Implementation"
 description = "Implement safe Rust code to pass tests"
 order = 4
 depends_on = ["tdd"]
-gate = "gates/implementation_gate.sh"
+validators = ["cargo_test", "cargo_build"]  # Tests must pass
 reports = ["json"]
 
 [layers.static_analysis]
@@ -58,7 +68,7 @@ name = "Static Analysis"
 description = "Run Clippy, cargo-audit, cargo-deny, unsafe audit"
 order = 5
 depends_on = ["implementation"]
-gate = "gates/static_analysis_gate.sh"
+validators = ["clippy", "audit", "deny", "geiger"]
 reports = ["json", "html"]
 
 [layers.formal_verification]
@@ -66,7 +76,7 @@ name = "Formal Verification"
 description = "Prove properties with Kani, Prusti, Creusot"
 order = 6
 depends_on = ["static_analysis"]
-gate = "gates/formal_verification_gate.sh"
+validators = ["kani"]
 reports = ["json"]
 optional = true  # May be skipped with justification
 
@@ -75,7 +85,7 @@ name = "Dynamic Analysis"
 description = "Run Miri, fuzzing, coverage, timing analysis"
 order = 7
 depends_on = ["implementation"]  # Can run parallel to formal verification
-gate = "gates/dynamic_analysis_gate.sh"
+validators = ["miri", "coverage"]
 reports = ["json", "html"]
 
 [layers.review]
@@ -83,7 +93,7 @@ name = "Independent Review"
 description = "Fresh-eyes review by independent agent"
 order = 8
 depends_on = ["static_analysis", "dynamic_analysis"]
-gate = "gates/review_gate.sh"
+validators = []  # Agent-based review
 reports = ["json", "html"]
 
 [layers.safety]
@@ -91,12 +101,14 @@ name = "Safety Case Assembly"
 description = "Assemble safety case and make release decision"
 order = 9
 depends_on = ["review", "formal_verification"]
-gate = "gates/safety_gate.sh"
+validators = []  # Human sign-off required
 reports = ["json", "html"]
 
 # ============================================================================
 # COMPONENT TASKS
 # Fine-grained tasks within layers, with explicit dependencies
+# Each task runs in its own git worktree branch for concurrent execution
+# Branch names default to: {branch_prefix}/{task_name}
 # ============================================================================
 
 [tasks.parse_requirements]
@@ -104,12 +116,14 @@ layer = "requirements"
 description = "Parse and validate requirement specifications"
 depends_on = []
 agent = "requirements-agent"
+branch = "swiss-cheese/requirements/parse"  # Optional: custom branch name
 
 [tasks.formalize_constraints]
 layer = "requirements"
 description = "Formalize Rust-specific type and ownership constraints"
 depends_on = ["parse_requirements"]
 agent = "requirements-agent"
+# branch auto-generated: swiss-cheese/formalize_constraints
 
 [tasks.design_modules]
 layer = "architecture"
@@ -123,6 +137,8 @@ description = "Define public interfaces and trait contracts"
 depends_on = ["design_modules"]
 agent = "architecture-agent"
 
+# TDD tasks - write_unit_tests and write_property_tests can run in PARALLEL
+# because they both only depend on define_interfaces (no interdependency)
 [tasks.write_unit_tests]
 layer = "tdd"
 description = "Write unit tests for all public interfaces"
@@ -138,7 +154,7 @@ agent = "tdd-agent"
 [tasks.write_property_tests]
 layer = "tdd"
 description = "Write property-based tests with proptest/quickcheck"
-depends_on = ["define_interfaces"]
+depends_on = ["define_interfaces"]  # Can run parallel to write_unit_tests
 agent = "tdd-agent"
 
 [tasks.implement_core]
@@ -249,6 +265,31 @@ commands = [
     { name = "miri", cmd = "cargo +nightly miri test 2>&1", output = "text" },
     { name = "coverage", cmd = "cargo llvm-cov --json --output-path coverage.json", output = "json" },
 ]
+
+# ============================================================================
+# VALIDATORS
+# Named validator commands used by layers for task validation
+# These are run after each task to verify success
+# ============================================================================
+
+[validators]
+# Build validators
+cargo_build = "cargo build --all-targets"
+cargo_test = "cargo test"
+cargo_check = "cargo check --all-targets"
+
+# Static analysis validators
+clippy = "cargo clippy --all-targets --all-features -- -D warnings"
+audit = "cargo audit"
+deny = "cargo deny check"
+geiger = "cargo geiger --all-features"
+
+# Dynamic analysis validators
+miri = "cargo +nightly miri test"
+coverage = "cargo llvm-cov --all-features"
+
+# Formal verification validators
+kani = "cargo kani"
 
 # ============================================================================
 # WORKTREE CONFIGURATION
