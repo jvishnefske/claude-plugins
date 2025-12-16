@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
-Swiss Cheese Orchestrator - Parallel Subagent Dispatch with Worktrees
+Swiss Cheese Orchestrator - Simplified Stop Hook Implementation
 
-This orchestrator runs on Stop events and:
-1. Validates TOML design documents against schema
-2. Creates git worktrees for parallel task execution
-3. Dispatches multiple subagents via Task tool prompts
-4. Tracks task/gate status in /tmp (invisible to agent)
-5. Runs Makefile targets for gate validation
-6. Generates traceability matrix
+This orchestrator runs on Stop events only. It:
+1. Validates TOML design documents against the schema
+2. Tracks task/gate status in /tmp (invisible to agent)
+3. Runs Makefile targets for gate validation
+4. Generates traceability matrix from test results
+5. Returns block/continue decision to keep the loop running
 
-The key innovation: outputs prompts that instruct Claude to spawn
-multiple Task tools in parallel, each working in its own worktree.
+Similar to ralph-wiggum stop-hook but with Makefile-based gating.
 """
 from __future__ import annotations
 
@@ -20,10 +18,7 @@ import json
 import os
 import subprocess
 import sys
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib
+import tomllib
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
@@ -35,8 +30,7 @@ from schema import validate_design_document, get_schema_for_agent, LAYERS
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
-    DISPATCHED = "dispatched"  # Subagent spawned, working
-    COMPLETED = "completed"    # Work done, needs validation
+    IN_PROGRESS = "in_progress"
     PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -44,9 +38,39 @@ class TaskStatus(str, Enum):
 
 class GateStatus(str, Enum):
     NOT_RUN = "not_run"
+    RUNNING = "running"
     PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+@dataclass
+class TaskState:
+    name: str
+    layer: str
+    status: TaskStatus = TaskStatus.PENDING
+    iteration: int = 0
+    requirements: list[str] = field(default_factory=list)
+    last_error: str | None = None
+    passed_at: str | None = None
+
+
+@dataclass
+class GateState:
+    name: str
+    target: str
+    status: GateStatus = GateStatus.NOT_RUN
+    output: str | None = None
+    exit_code: int | None = None
+    run_at: str | None = None
+
+
+@dataclass
+class TraceabilityEntry:
+    requirement_id: str
+    task_ids: list[str] = field(default_factory=list)
+    test_names: list[str] = field(default_factory=list)
+    status: str = "pending"  # pending, covered, verified
 
 
 @dataclass
@@ -63,7 +87,6 @@ class OrchestratorStatus:
     traceability: dict[str, dict] = field(default_factory=dict)
     iteration: int = 0
     max_iterations: int = 5
-    max_parallel: int = 4
 
     @classmethod
     def load(cls, path: Path) -> "OrchestratorStatus | None":
@@ -85,11 +108,11 @@ class OrchestratorStatus:
 # Environment
 PROJECT_DIR = Path(os.environ.get("CLAUDE_PROJECT_DIR", Path.cwd()))
 PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", Path(__file__).parent.parent))
-WORKTREE_BASE = PROJECT_DIR / ".worktrees"
 
 
 def get_status_file_path(project_name: str) -> Path:
-    """Get status file path in /tmp based on project directory."""
+    """Get status file path in /tmp based on project name."""
+    # Use hash of project dir to avoid collisions
     project_hash = hashlib.md5(str(PROJECT_DIR).encode()).hexdigest()[:8]
     return Path(f"/tmp/swiss_cheese_{project_hash}.json")
 
@@ -101,6 +124,7 @@ def find_design_document() -> Path | None:
         PROJECT_DIR / "swiss-cheese.toml",
         PROJECT_DIR / "requirements.toml",
         PROJECT_DIR / ".claude" / "design.toml",
+        PROJECT_DIR / "docs" / "design.toml",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -117,187 +141,9 @@ def parse_design_document(path: Path) -> tuple[dict, Any]:
     """Parse and validate TOML design document."""
     with open(path, "rb") as f:
         data = tomllib.load(f)
+
     validation = validate_design_document(data)
     return data, validation
-
-
-def create_worktree(task_name: str, branch: str) -> Path | None:
-    """Create git worktree for a task. Returns worktree path or None on failure."""
-    worktree_path = WORKTREE_BASE / task_name.replace("/", "-")
-
-    if worktree_path.exists():
-        return worktree_path
-
-    WORKTREE_BASE.mkdir(parents=True, exist_ok=True)
-
-    try:
-        # Check if branch exists
-        result = subprocess.run(
-            ["git", "branch", "--list", branch],
-            capture_output=True, cwd=PROJECT_DIR
-        )
-
-        if not result.stdout.strip():
-            # Create branch from current HEAD
-            subprocess.run(
-                ["git", "branch", branch],
-                cwd=PROJECT_DIR, check=True, capture_output=True
-            )
-
-        # Create worktree
-        subprocess.run(
-            ["git", "worktree", "add", str(worktree_path), branch],
-            cwd=PROJECT_DIR, check=True, capture_output=True
-        )
-        return worktree_path
-    except subprocess.CalledProcessError:
-        return None
-
-
-def get_main_branch() -> str:
-    """Get the name of the main branch (main or master)."""
-    try:
-        result = subprocess.run(
-            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
-            cwd=PROJECT_DIR, capture_output=True
-        )
-        if result.returncode == 0:
-            # refs/remotes/origin/main -> main
-            return result.stdout.decode().strip().split("/")[-1]
-    except Exception:
-        pass
-
-    # Fallback: check if main or master exists
-    for branch in ["main", "master"]:
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", branch],
-            cwd=PROJECT_DIR, capture_output=True
-        )
-        if result.returncode == 0:
-            return branch
-
-    return "main"
-
-
-def rebase_worktree_to_main(task: dict) -> tuple[bool, str]:
-    """Rebase a task's worktree branch onto main and merge.
-
-    Returns (success, message).
-    """
-    worktree_path = task.get("worktree_path")
-    branch = task.get("branch")
-
-    if not worktree_path or not branch:
-        return True, "No worktree to rebase"
-
-    worktree = Path(worktree_path)
-    if not worktree.exists():
-        return True, "Worktree doesn't exist"
-
-    main_branch = get_main_branch()
-
-    try:
-        # 1. Fetch latest main in the worktree
-        subprocess.run(
-            ["git", "fetch", "origin", main_branch],
-            cwd=worktree, capture_output=True, check=True
-        )
-
-        # 2. Rebase the task branch onto main
-        result = subprocess.run(
-            ["git", "rebase", f"origin/{main_branch}"],
-            cwd=worktree, capture_output=True
-        )
-
-        if result.returncode != 0:
-            # Rebase conflict - abort and report
-            subprocess.run(["git", "rebase", "--abort"], cwd=worktree, capture_output=True)
-            return False, f"Rebase conflict in {branch}: {result.stderr.decode()[:200]}"
-
-        # 3. Switch to main in the main project dir and merge
-        subprocess.run(
-            ["git", "checkout", main_branch],
-            cwd=PROJECT_DIR, capture_output=True, check=True
-        )
-
-        # 4. Merge the rebased branch (fast-forward if possible)
-        result = subprocess.run(
-            ["git", "merge", "--ff-only", branch],
-            cwd=PROJECT_DIR, capture_output=True
-        )
-
-        if result.returncode != 0:
-            # Try regular merge if ff fails
-            result = subprocess.run(
-                ["git", "merge", branch, "-m", f"[swiss-cheese] Merge {branch}"],
-                cwd=PROJECT_DIR, capture_output=True
-            )
-            if result.returncode != 0:
-                return False, f"Merge failed for {branch}: {result.stderr.decode()[:200]}"
-
-        # 5. Clean up worktree
-        subprocess.run(
-            ["git", "worktree", "remove", str(worktree)],
-            cwd=PROJECT_DIR, capture_output=True
-        )
-
-        return True, f"Merged {branch} into {main_branch}"
-
-    except subprocess.CalledProcessError as e:
-        return False, f"Git error: {e}"
-    except Exception as e:
-        return False, str(e)
-
-
-def rebase_layer_tasks(status: OrchestratorStatus, layer: str) -> list[str]:
-    """Rebase all passed tasks for a layer back to main.
-
-    Returns list of error messages (empty if all succeeded).
-    """
-    errors = []
-
-    for task_name, task in status.tasks.items():
-        if task["layer"] == layer and task["status"] == TaskStatus.PASSED.value:
-            success, message = rebase_worktree_to_main(task)
-            if not success:
-                errors.append(f"{task_name}: {message}")
-            else:
-                # Clear worktree path since it's been cleaned up
-                task["worktree_path"] = None
-
-    return errors
-
-
-def check_worktree_has_new_commits(worktree_path: Path, since_hash: str | None) -> bool:
-    """Check if worktree has new commits since a given hash."""
-    if not worktree_path.exists():
-        return False
-
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=worktree_path, capture_output=True, check=True
-        )
-        current_hash = result.stdout.decode().strip()
-
-        if since_hash is None:
-            return True  # First check, assume work done
-
-        return current_hash != since_hash
-    except subprocess.CalledProcessError:
-        return False
-
-
-def get_worktree_head(worktree_path: Path) -> str | None:
-    """Get HEAD commit hash of a worktree."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=worktree_path, capture_output=True, check=True
-        )
-        return result.stdout.decode().strip()
-    except subprocess.CalledProcessError:
-        return None
 
 
 def init_status_from_design(design_path: Path, data: dict) -> OrchestratorStatus:
@@ -313,25 +159,18 @@ def init_status_from_design(design_path: Path, data: dict) -> OrchestratorStatus
         updated_at=now,
         current_layer="requirements",
         max_iterations=project.get("max_iterations", 5),
-        max_parallel=project.get("max_parallel_agents", 4),
     )
 
     # Initialize tasks from design
     for task_name, task in data.get("tasks", {}).items():
-        branch = task.get("branch", f"swiss-cheese/{task_name}")
         status.tasks[task_name] = {
             "name": task_name,
             "layer": task["layer"],
-            "description": task.get("description", ""),
-            "depends_on": task.get("depends_on", []),
-            "requirements": task.get("requirements", []),
-            "agent": task.get("agent", "general-purpose"),
-            "branch": branch,
             "status": TaskStatus.PENDING.value,
             "iteration": 0,
-            "worktree_path": None,
-            "last_commit": None,
+            "requirements": task.get("requirements", []),
             "last_error": None,
+            "passed_at": None,
         }
 
     # Initialize gates from layers
@@ -342,19 +181,20 @@ def init_status_from_design(design_path: Path, data: dict) -> OrchestratorStatus
             "status": GateStatus.NOT_RUN.value,
             "output": None,
             "exit_code": None,
+            "run_at": None,
         }
 
     # Initialize traceability from requirements
     for req in data.get("requirements", []):
         req_id = req.get("id")
         if req_id:
+            # Find tasks that reference this requirement
             task_ids = [
                 name for name, task in data.get("tasks", {}).items()
                 if req_id in task.get("requirements", [])
             ]
             status.traceability[req_id] = {
                 "requirement_id": req_id,
-                "title": req.get("title", ""),
                 "task_ids": task_ids,
                 "test_names": [],
                 "status": "pending",
@@ -363,38 +203,7 @@ def init_status_from_design(design_path: Path, data: dict) -> OrchestratorStatus
     return status
 
 
-def get_ready_tasks(status: OrchestratorStatus) -> list[str]:
-    """Get tasks ready to dispatch (dependencies satisfied, in current layer)."""
-    ready = []
-
-    for task_name, task in status.tasks.items():
-        # Only pending tasks in current layer
-        if task["layer"] != status.current_layer:
-            continue
-        if task["status"] != TaskStatus.PENDING.value:
-            continue
-
-        # Check dependencies are satisfied
-        deps_ok = all(
-            status.tasks.get(dep, {}).get("status") == TaskStatus.PASSED.value
-            for dep in task.get("depends_on", [])
-        )
-
-        if deps_ok:
-            ready.append(task_name)
-
-    return ready[:status.max_parallel]
-
-
-def get_dispatched_tasks(status: OrchestratorStatus) -> list[str]:
-    """Get tasks that have been dispatched (subagents working)."""
-    return [
-        name for name, task in status.tasks.items()
-        if task["status"] == TaskStatus.DISPATCHED.value
-    ]
-
-
-def run_makefile_gate(target: str) -> tuple[bool, str, int]:
+def run_makefile_gate(gate_name: str, target: str) -> tuple[bool, str, int]:
     """Run a Makefile target for gate validation."""
     makefile_path = PROJECT_DIR / "Makefile"
     if not makefile_path.exists():
@@ -405,10 +214,10 @@ def run_makefile_gate(target: str) -> tuple[bool, str, int]:
             ["make", target],
             cwd=PROJECT_DIR,
             capture_output=True,
-            timeout=600,
+            timeout=600,  # 10 minute timeout
         )
         output = result.stdout.decode() + result.stderr.decode()
-        return result.returncode == 0, output[-2000:], result.returncode
+        return result.returncode == 0, output[-2000:], result.returncode  # Truncate output
     except subprocess.TimeoutExpired:
         return False, "Gate validation timed out after 10 minutes", -1
     except FileNotFoundError:
@@ -417,11 +226,21 @@ def run_makefile_gate(target: str) -> tuple[bool, str, int]:
         return False, str(e), -1
 
 
+def get_current_layer_tasks(status: OrchestratorStatus) -> list[str]:
+    """Get tasks in the current layer that need work."""
+    return [
+        name for name, task in status.tasks.items()
+        if task["layer"] == status.current_layer
+        and task["status"] in (TaskStatus.PENDING.value, TaskStatus.FAILED.value)
+        and task["iteration"] < status.max_iterations
+    ]
+
+
 def all_layer_tasks_complete(status: OrchestratorStatus, layer: str) -> bool:
-    """Check if all tasks in a layer are passed/skipped."""
+    """Check if all tasks in a layer are complete."""
     layer_tasks = [t for t in status.tasks.values() if t["layer"] == layer]
     if not layer_tasks:
-        return True
+        return True  # No tasks in this layer
     return all(
         t["status"] in (TaskStatus.PASSED.value, TaskStatus.SKIPPED.value)
         for t in layer_tasks
@@ -440,106 +259,79 @@ def get_next_layer(current: str) -> str | None:
     return None
 
 
-def build_task_invocation(task_name: str, task: dict) -> str:
-    """Build a single Task tool invocation string."""
-    worktree = task.get("worktree_path", f".worktrees/{task_name}")
-    agent = task.get("agent", "general-purpose")
-    description = task.get("description", "No description")
-    requirements = ", ".join(task.get("requirements", [])) or "None"
-    layer = task.get("layer", "unknown")
-
-    # Build the prompt for the subagent
-    subagent_prompt = f"""You are working in worktree directory: {worktree}
-
-## Task: {task_name}
-**Layer**: {layer}
-**Description**: {description}
-**Requirements addressed**: {requirements}
-
-## Instructions
-
-1. Change to the worktree directory: `cd {worktree}`
-2. Implement the task as described above
-3. Write tests if this is a TDD or implementation task
-4. Commit your changes with message: `[swiss-cheese] {task_name}`
-5. Ensure code compiles and tests pass
-
-When you complete this task, the orchestrator will validate the layer gate."""
-
-    # Return formatted invocation (using angle brackets that won't be parsed as XML)
-    return f"""
-**{task_name}** ({agent}):
-- Worktree: `{worktree}`
-- Description: {description}
-
-Use Task tool with:
-- description: "{task_name}"
-- subagent_type: "{agent}"
-- prompt: (see below)
-
-Prompt for {task_name}:
-```
-{subagent_prompt}
-```
-"""
+def check_layer_dependencies(status: OrchestratorStatus, layer: str) -> bool:
+    """Check if all dependency layers have passed their gates."""
+    layer_info = LAYERS.get(layer, {})
+    deps = layer_info.get("depends_on", [])
+    for dep in deps:
+        gate = status.gates.get(dep, {})
+        if gate.get("status") != GateStatus.PASSED.value:
+            return False
+    return True
 
 
-def generate_dispatch_prompt(status: OrchestratorStatus, tasks: list[str]) -> str:
-    """Generate prompt instructing Claude to spawn parallel Task tools."""
+def update_traceability_from_tests(status: OrchestratorStatus) -> None:
+    """Update traceability matrix from test output files."""
+    # Look for test result files
+    test_files = [
+        PROJECT_DIR / "target" / "test-results.json",
+        PROJECT_DIR / "test-results.json",
+        PROJECT_DIR / "coverage.json",
+    ]
 
-    layer_info = LAYERS.get(status.current_layer, {})
+    for test_file in test_files:
+        if not test_file.exists():
+            continue
+        try:
+            with open(test_file) as f:
+                test_data = json.load(f)
 
-    prompt = f"""## [Swiss Cheese] Dispatch Parallel Subagents
-
-**Current Layer**: {status.current_layer} - {layer_info.get("description", "")}
-**Tasks to dispatch**: {len(tasks)}
-
-You must now spawn {len(tasks)} subagent(s) using the Task tool.
-**IMPORTANT**: Call ALL Task tools in a SINGLE message to run them in parallel.
-
-"""
-
-    for task_name in tasks:
-        task = status.tasks[task_name]
-        prompt += build_task_invocation(task_name, task)
-        prompt += "\n---\n"
-
-    prompt += f"""
-## Parallel Execution
-
-To run these tasks in parallel, include ALL {len(tasks)} Task tool calls in your next response.
-
-Example structure (you must fill in the actual parameters):
-
-```
-I'll spawn {len(tasks)} parallel subagents to work on these tasks.
-
-[Task tool call for {tasks[0]}]
-{"[Task tool call for " + tasks[1] + "]" if len(tasks) > 1 else ""}
-{"[Task tool call for " + tasks[2] + "]" if len(tasks) > 2 else ""}
-...
-```
-
-After the subagents complete, try to stop again and the orchestrator will validate the gate.
-"""
-
-    return prompt
+            # Extract test names and try to match to requirements
+            # Convention: test_req_001_* matches REQ-001
+            for test_name in extract_test_names(test_data):
+                for req_id, trace in status.traceability.items():
+                    # Match test names to requirements
+                    req_num = req_id.replace("REQ-", "").lower()
+                    if f"req_{req_num}" in test_name.lower() or f"req{req_num}" in test_name.lower():
+                        if test_name not in trace["test_names"]:
+                            trace["test_names"].append(test_name)
+                        trace["status"] = "covered"
+        except (json.JSONDecodeError, KeyError):
+            continue
 
 
-def check_dispatched_tasks_complete(status: OrchestratorStatus) -> list[str]:
-    """Check which dispatched tasks have new commits (work done)."""
-    completed = []
+def extract_test_names(test_data: dict) -> list[str]:
+    """Extract test names from various test result formats."""
+    names = []
 
-    for task_name in get_dispatched_tasks(status):
-        task = status.tasks[task_name]
-        worktree_path = task.get("worktree_path")
+    # Cargo test JSON format
+    if "tests" in test_data:
+        for test in test_data["tests"]:
+            if "name" in test:
+                names.append(test["name"])
 
-        if worktree_path and Path(worktree_path).exists():
-            last_commit = task.get("last_commit")
-            if check_worktree_has_new_commits(Path(worktree_path), last_commit):
-                completed.append(task_name)
+    # LLVM-cov format
+    if "data" in test_data:
+        for item in test_data.get("data", []):
+            for func in item.get("functions", []):
+                if func.get("name", "").startswith("test_"):
+                    names.append(func["name"])
 
-    return completed
+    # Generic: look for any "name" field containing "test"
+    def find_tests(obj, depth=0):
+        if depth > 10:
+            return
+        if isinstance(obj, dict):
+            if "name" in obj and "test" in str(obj["name"]).lower():
+                names.append(obj["name"])
+            for v in obj.values():
+                find_tests(v, depth + 1)
+        elif isinstance(obj, list):
+            for item in obj:
+                find_tests(item, depth + 1)
+
+    find_tests(test_data)
+    return list(set(names))
 
 
 def generate_traceability_report(status: OrchestratorStatus) -> dict:
@@ -549,8 +341,8 @@ def generate_traceability_report(status: OrchestratorStatus) -> dict:
         "generated_at": datetime.now().isoformat(),
         "summary": {
             "total_requirements": len(status.traceability),
-            "verified": 0,
             "covered": 0,
+            "verified": 0,
             "pending": 0,
         },
         "matrix": [],
@@ -559,13 +351,13 @@ def generate_traceability_report(status: OrchestratorStatus) -> dict:
     for req_id, trace in status.traceability.items():
         entry = {
             "requirement_id": req_id,
-            "title": trace.get("title", ""),
             "tasks": trace["task_ids"],
             "tests": trace["test_names"],
             "status": trace["status"],
         }
         report["matrix"].append(entry)
 
+        # Update summary counts
         if trace["status"] == "verified":
             report["summary"]["verified"] += 1
         elif trace["status"] == "covered":
@@ -576,248 +368,78 @@ def generate_traceability_report(status: OrchestratorStatus) -> dict:
     return report
 
 
-def check_transcript_for_task_completion(transcript_path: str, task_names: list[str]) -> list[str]:
-    """Check transcript for evidence that tasks were worked on."""
-    completed = []
+def build_continue_prompt(status: OrchestratorStatus, pending_tasks: list[str], gate_failed: bool = False) -> str:
+    """Build the prompt to continue orchestration."""
+    layer_info = LAYERS.get(status.current_layer, {})
 
-    if not transcript_path:
-        return completed
+    prompt = f"""## [Swiss Cheese] Orchestration Iteration {status.iteration + 1}
 
-    # Expand ~ in path
-    path = Path(transcript_path).expanduser()
-    if not path.exists():
-        return completed
+**Current Layer**: {status.current_layer} - {layer_info.get('description', '')}
+**Design Document**: {status.design_doc_path}
 
-    try:
-        content = path.read_text()
-        # Look for task-related commits or completion indicators
-        for task_name in task_names:
-            # Check for commit messages or task references
-            if f"[swiss-cheese] {task_name}" in content or f"completed {task_name}" in content.lower():
-                completed.append(task_name)
-    except Exception:
-        pass
+"""
 
-    return completed
+    if gate_failed:
+        gate = status.gates.get(status.current_layer, {})
+        prompt += f"""### Gate Validation Failed
 
-
-def identify_task_from_subagent(input_data: dict, status: OrchestratorStatus) -> str | None:
-    """Identify which task a subagent was working on from its input data.
-
-    SubagentStop input includes:
-    - task_description: Short description we provided (matches task name)
-    - subagent_type: The agent type used
-    - result: The subagent's final output
-    """
-    # The task_description should match the task name we dispatched
-    task_description = input_data.get("task_description", "")
-
-    # Direct match on task name
-    if task_description in status.tasks:
-        return task_description
-
-    # Try to find task by matching description
-    for task_name, task in status.tasks.items():
-        if task["status"] == TaskStatus.DISPATCHED.value:
-            # Check if description matches
-            if task_name in task_description or task_description in task.get("description", ""):
-                return task_name
-
-    # Fallback: check the subagent result for task references
-    result = input_data.get("result", "")
-    for task_name, task in status.tasks.items():
-        if task["status"] == TaskStatus.DISPATCHED.value:
-            if f"[swiss-cheese] {task_name}" in result:
-                return task_name
-
-    return None
-
-
-def handle_subagent_stop(input_data: dict) -> dict:
-    """Handle SubagentStop event - a subagent just finished.
-
-    Input data from Claude Code:
-    - task_description: The description we provided to the Task tool
-    - subagent_type: The agent type that was used
-    - result: The subagent's output/result
-    - hook_event_name: "SubagentStop"
-    """
-    # Find design document
-    design_path = find_design_document()
-    if design_path is None:
-        return {"continue": True}  # No swiss-cheese project active
-
-    # Parse design document
-    try:
-        data, validation = parse_design_document(design_path)
-    except Exception:
-        return {"continue": True}  # Can't validate, let it continue
-
-    if not validation.valid:
-        return {"continue": True}  # Invalid doc, handle in Stop event
-
-    # Load status
-    status_path = get_status_file_path(data["project"]["name"])
-    status = OrchestratorStatus.load(status_path)
-
-    if status is None:
-        return {"continue": True}  # No active orchestration
-
-    # Identify which task completed
-    task_name = identify_task_from_subagent(input_data, status)
-
-    if task_name is None:
-        # Can't identify task - might be a non-swiss-cheese subagent
-        return {"continue": True}
-
-    task = status.tasks.get(task_name)
-    if task is None or task["status"] != TaskStatus.DISPATCHED.value:
-        return {"continue": True}
-
-    # Mark task as completed
-    task["status"] = TaskStatus.COMPLETED.value
-
-    # Update last_commit if we have a worktree
-    if task.get("worktree_path"):
-        worktree_path = Path(task["worktree_path"])
-        if worktree_path.exists():
-            task["last_commit"] = get_worktree_head(worktree_path)
-
-    # Check if all dispatched tasks for this layer are now complete
-    layer = task["layer"]
-    layer_dispatched = [
-        t for t in status.tasks.values()
-        if t["layer"] == layer and t["status"] == TaskStatus.DISPATCHED.value
-    ]
-
-    if layer_dispatched:
-        # Still have running subagents, save and continue
-        status.save(status_path)
-        return {
-            "continue": True,
-            "systemMessage": f"[Swiss Cheese] Task '{task_name}' completed. Waiting for {len(layer_dispatched)} more subagent(s)...",
-        }
-
-    # All subagents for this layer complete - run gate validation
-    gate = status.gates.get(layer, {})
-    target = gate.get("target", f"validate-{layer}")
-
-    passed, output, exit_code = run_makefile_gate(target)
-    gate["output"] = output
-    gate["exit_code"] = exit_code
-
-    if passed:
-        gate["status"] = GateStatus.PASSED.value
-        # Mark all completed tasks in this layer as passed
-        for t_name, t in status.tasks.items():
-            if t["layer"] == layer and t["status"] == TaskStatus.COMPLETED.value:
-                t["status"] = TaskStatus.PASSED.value
-                # Update traceability
-                for req_id in t.get("requirements", []):
-                    if req_id in status.traceability:
-                        status.traceability[req_id]["status"] = "verified"
-
-        # Rebase passed tasks back to main branch
-        rebase_errors = rebase_layer_tasks(status, layer)
-        if rebase_errors:
-            # Rebase failed - report but don't block (tasks already passed gate)
-            error_msg = "\n".join(rebase_errors)
-            status.save(status_path)
-            return {
-                "continue": True,
-                "systemMessage": f"""[Swiss Cheese] Gate '{layer}' passed but rebase failed:
-
-{error_msg}
-
-Please manually resolve conflicts and merge the branches.""",
-            }
-
-        # Check if layer is now complete
-        if all_layer_tasks_complete(status, layer):
-            next_layer = get_next_layer(layer)
-            if next_layer:
-                status.current_layer = next_layer
-                status.save(status_path)
-                return {
-                    "continue": True,
-                    "systemMessage": f"[Swiss Cheese] Layer '{layer}' complete! Advancing to '{next_layer}'.",
-                }
-            else:
-                # All done!
-                report = generate_traceability_report(status)
-                report_path = PROJECT_DIR / ".claude" / "traceability_matrix.json"
-                report_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(report_path, "w") as f:
-                    json.dump(report, f, indent=2)
-
-                status.save(status_path)
-                return {
-                    "continue": True,
-                    "systemMessage": f"[Swiss Cheese] All verification layers complete! Traceability matrix saved to {report_path}",
-                }
-
-        status.save(status_path)
-        return {
-            "continue": True,
-            "systemMessage": f"[Swiss Cheese] Gate '{layer}' passed! Task '{task_name}' verified.",
-        }
-    else:
-        gate["status"] = GateStatus.FAILED.value
-        # Mark completed tasks as pending for retry
-        for t_name, t in status.tasks.items():
-            if t["layer"] == layer and t["status"] == TaskStatus.COMPLETED.value:
-                t["iteration"] += 1
-                if t["iteration"] >= status.max_iterations:
-                    t["status"] = TaskStatus.FAILED.value
-                    t["last_error"] = output[:500]
-                else:
-                    t["status"] = TaskStatus.PENDING.value
-                    t["last_error"] = output[:500]
-
-        status.save(status_path)
-        return {
-            "continue": True,
-            "systemMessage": f"""[Swiss Cheese] Gate '{layer}' FAILED!
-
-**Makefile target**: `make {target}`
-**Exit code**: {exit_code}
-
-Tasks reset to pending for retry. When you stop, the orchestrator will re-dispatch.
+The `{gate.get('target')}` Makefile target failed (exit code: {gate.get('exit_code')}).
 
 **Output**:
 ```
-{output[:800]}
-```""",
-        }
+{gate.get('output', 'No output captured')[:1500]}
+```
+
+Please fix the issues and ensure the gate passes before proceeding.
+
+"""
+
+    if pending_tasks:
+        prompt += f"""### Pending Tasks in {status.current_layer} layer
+
+The following tasks need to be completed:
+
+"""
+        for task_name in pending_tasks:
+            task = status.tasks[task_name]
+            prompt += f"- **{task_name}**: {task.get('description', 'No description')}"
+            if task["last_error"]:
+                prompt += f" (Previous error: {task['last_error'][:200]})"
+            prompt += "\n"
+
+        prompt += """
+Work on these tasks and mark them complete. When done, the orchestrator will run the layer's gate validation.
+"""
+    else:
+        prompt += f"""### Ready for Gate Validation
+
+All tasks in the {status.current_layer} layer are complete. Run `make {layer_info.get('makefile_target')}` to validate.
+"""
+
+    return prompt
 
 
 def handle_stop_event(input_data: dict) -> dict:
-    """Main Stop event handler - orchestration logic.
-
-    Input data from Claude Code:
-    - session_id: Current session identifier
-    - transcript_path: Path to conversation transcript
-    - hook_event_name: Should be "Stop"
-    - stop_hook_active: Whether stop hook is active
-    """
-    # Extract useful fields from input
-    transcript_path = input_data.get("transcript_path", "")
+    """Main Stop event handler - orchestration logic."""
 
     # 1. Find design document
     design_path = find_design_document()
     if design_path is None:
+        # No design document - allow stop, no orchestration needed
         return {"decision": "approve"}
 
     # 2. Parse and validate design document
     try:
         data, validation = parse_design_document(design_path)
     except Exception as e:
+        # Invalid TOML - block and ask for fix
         return {
             "decision": "block",
             "reason": f"[Swiss Cheese] Invalid design document: {e}\n\nPlease fix the TOML syntax.",
         }
 
     if not validation.valid:
+        # Schema validation failed - provide schema and ask for fix
         error_msg = "\n".join(f"- {e.path}: {e.message}" for e in validation.errors)
         schema = get_schema_for_agent()
         return {
@@ -838,215 +460,147 @@ Please update the design document to match the schema.
     status_path = get_status_file_path(data["project"]["name"])
     status = OrchestratorStatus.load(status_path)
 
+    # Check if design doc changed
     current_hash = compute_file_hash(design_path)
     if status is None or status.design_doc_hash != current_hash:
+        # New or changed design doc - reinitialize
         status = init_status_from_design(design_path, data)
         status.save(status_path)
 
-    # 4. Check if any tasks are dispatched (subagents running)
-    dispatched = get_dispatched_tasks(status)
+    # 4. Update traceability from any test results
+    update_traceability_from_tests(status)
 
-    if dispatched:
-        # Check if dispatched tasks have completed (new commits OR transcript evidence)
-        completed = check_dispatched_tasks_complete(status)
+    # 5. Check current layer status
+    current_layer = status.current_layer
 
-        # Also check transcript for completion evidence
-        if transcript_path:
-            transcript_completed = check_transcript_for_task_completion(transcript_path, dispatched)
-            for task_name in transcript_completed:
-                if task_name not in completed:
-                    completed.append(task_name)
+    # Check if we can proceed with this layer (dependencies met)
+    if not check_layer_dependencies(status, current_layer):
+        deps = LAYERS.get(current_layer, {}).get("depends_on", [])
+        return {
+            "decision": "block",
+            "reason": f"[Swiss Cheese] Cannot proceed with {current_layer} - dependencies not met: {deps}",
+        }
 
-        for task_name in completed:
-            task = status.tasks[task_name]
-            task["status"] = TaskStatus.COMPLETED.value
-            # Update last_commit
-            if task.get("worktree_path"):
-                task["last_commit"] = get_worktree_head(Path(task["worktree_path"]))
+    # 6. Get pending tasks in current layer
+    pending_tasks = get_current_layer_tasks(status)
 
-        # If some tasks still dispatched (no new commits), wait
-        still_running = [t for t in dispatched if t not in completed]
-        if still_running:
+    # 7. If tasks pending, block and continue work
+    if pending_tasks:
+        status.iteration += 1
+        status.save(status_path)
+        prompt = build_continue_prompt(status, pending_tasks)
+        return {
+            "decision": "block",
+            "reason": prompt,
+        }
+
+    # 8. All tasks in layer complete - run gate validation
+    if all_layer_tasks_complete(status, current_layer):
+        gate = status.gates.get(current_layer, {})
+
+        # Only run gate if not already passed
+        if gate.get("status") != GateStatus.PASSED.value:
+            gate["status"] = GateStatus.RUNNING.value
+            gate["run_at"] = datetime.now().isoformat()
             status.save(status_path)
-            return {
-                "decision": "block",
-                "reason": f"""[Swiss Cheese] Waiting for subagents to complete...
 
-**Still running**: {", ".join(still_running)}
+            passed, output, exit_code = run_makefile_gate(current_layer, gate["target"])
 
-The subagents are working in their worktrees. Once they commit their changes,
-the orchestrator will detect completion and proceed with gate validation.
+            gate["output"] = output
+            gate["exit_code"] = exit_code
 
-If the subagents have finished, ensure they committed their changes.
-""",
-            }
+            if passed:
+                gate["status"] = GateStatus.PASSED.value
 
-    # 5. Check for completed tasks that need validation
-    completed_tasks = [
-        name for name, task in status.tasks.items()
-        if task["status"] == TaskStatus.COMPLETED.value
-    ]
-
-    if completed_tasks:
-        # Run gate validation for the current layer
-        gate = status.gates.get(status.current_layer, {})
-        target = gate.get("target", f"validate-{status.current_layer}")
-
-        passed, output, exit_code = run_makefile_gate(target)
-        gate["output"] = output
-        gate["exit_code"] = exit_code
-
-        if passed:
-            gate["status"] = GateStatus.PASSED.value
-            # Mark completed tasks as passed
-            for task_name in completed_tasks:
-                if status.tasks[task_name]["layer"] == status.current_layer:
-                    status.tasks[task_name]["status"] = TaskStatus.PASSED.value
-                    # Update traceability
-                    for req_id in status.tasks[task_name].get("requirements", []):
-                        if req_id in status.traceability:
-                            status.traceability[req_id]["status"] = "verified"
-
-            # Rebase passed tasks back to main branch
-            rebase_errors = rebase_layer_tasks(status, status.current_layer)
-            if rebase_errors:
-                error_msg = "\n".join(rebase_errors)
+                # Mark requirements in this layer as verified
+                for task in status.tasks.values():
+                    if task["layer"] == current_layer:
+                        for req_id in task.get("requirements", []):
+                            if req_id in status.traceability:
+                                status.traceability[req_id]["status"] = "verified"
+            else:
+                gate["status"] = GateStatus.FAILED.value
                 status.save(status_path)
+
+                # Reset tasks to allow retry
+                for task_name, task in status.tasks.items():
+                    if task["layer"] == current_layer and task["status"] == TaskStatus.PASSED.value:
+                        if task["iteration"] < status.max_iterations:
+                            task["status"] = TaskStatus.PENDING.value
+
+                prompt = build_continue_prompt(status, get_current_layer_tasks(status), gate_failed=True)
                 return {
                     "decision": "block",
-                    "reason": f"""[Swiss Cheese] Gate passed but rebase failed:
-
-{error_msg}
-
-Please manually resolve conflicts and merge the branches, then try again.""",
+                    "reason": prompt,
                 }
-        else:
-            gate["status"] = GateStatus.FAILED.value
-            # Mark tasks as failed, allow retry
-            for task_name in completed_tasks:
-                task = status.tasks[task_name]
-                if task["layer"] == status.current_layer:
-                    task["iteration"] += 1
-                    if task["iteration"] >= status.max_iterations:
-                        task["status"] = TaskStatus.FAILED.value
-                        task["last_error"] = output[:500]
-                    else:
-                        task["status"] = TaskStatus.PENDING.value
-                        task["last_error"] = output[:500]
 
-            status.save(status_path)
-            return {
-                "decision": "block",
-                "reason": f"""[Swiss Cheese] Gate validation FAILED for {status.current_layer}
-
-**Makefile target**: `make {target}`
-**Exit code**: {exit_code}
-
-**Output**:
-```
-{output[:1500]}
-```
-
-Please fix the issues and try again. Tasks have been reset to pending for retry.
-""",
-            }
-
-    # 6. Check if current layer is complete
-    if all_layer_tasks_complete(status, status.current_layer):
-        # Advance to next layer
-        next_layer = get_next_layer(status.current_layer)
+        # Gate passed - move to next layer
+        next_layer = get_next_layer(current_layer)
         if next_layer:
+            # Check if next layer is optional and should be skipped
+            if LAYERS.get(next_layer, {}).get("optional", False):
+                # For now, proceed - user can skip via command
+                pass
+
             status.current_layer = next_layer
             status.save(status_path)
-            # Continue to check for ready tasks in new layer
-        else:
-            # All layers complete!
-            report = generate_traceability_report(status)
-            report_path = PROJECT_DIR / ".claude" / "traceability_matrix.json"
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(report_path, "w") as f:
-                json.dump(report, f, indent=2)
 
-            return {
-                "decision": "approve",
-                "systemMessage": f"""[Swiss Cheese] All verification layers complete!
+            pending = get_current_layer_tasks(status)
+            if pending:
+                prompt = build_continue_prompt(status, pending)
+                return {
+                    "decision": "block",
+                    "reason": prompt,
+                }
 
-Traceability matrix saved to: {report_path}
+    # 9. Check if all gates passed (orchestration complete)
+    all_required_passed = all(
+        status.gates.get(layer, {}).get("status") == GateStatus.PASSED.value
+        for layer in LAYERS
+        if not LAYERS[layer].get("optional", False)
+    )
+
+    if all_required_passed:
+        # Generate final traceability report
+        report = generate_traceability_report(status)
+        report_path = PROJECT_DIR / ".claude" / "traceability_matrix.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(report_path, "w") as f:
+            json.dump(report, f, indent=2)
+
+        return {
+            "decision": "approve",
+            "systemMessage": f"""[Swiss Cheese] Orchestration Complete!
+
+All verification gates passed. Traceability matrix saved to: {report_path}
 
 **Summary**:
 - Requirements: {report['summary']['total_requirements']}
 - Verified: {report['summary']['verified']}
 - Covered: {report['summary']['covered']}
 - Pending: {report['summary']['pending']}
-
-Ready for release decision.
-""",
-            }
-
-    # 7. Get tasks ready to dispatch
-    ready_tasks = get_ready_tasks(status)
-
-    if ready_tasks:
-        # Create worktrees and mark as dispatched
-        for task_name in ready_tasks:
-            task = status.tasks[task_name]
-            worktree = create_worktree(task_name, task["branch"])
-            if worktree:
-                task["worktree_path"] = str(worktree)
-                task["last_commit"] = get_worktree_head(worktree)
-            task["status"] = TaskStatus.DISPATCHED.value
-
-        status.iteration += 1
-        status.save(status_path)
-
-        prompt = generate_dispatch_prompt(status, ready_tasks)
-        return {
-            "decision": "block",
-            "reason": prompt,
-        }
-
-    # 8. No tasks ready - might be waiting on dependencies
-    pending = [
-        name for name, task in status.tasks.items()
-        if task["status"] == TaskStatus.PENDING.value
-        and task["layer"] == status.current_layer
-    ]
-
-    if pending:
-        status.save(status_path)
-        return {
-            "decision": "block",
-            "reason": f"""[Swiss Cheese] Waiting on task dependencies
-
-**Current layer**: {status.current_layer}
-**Pending tasks**: {", ".join(pending)}
-
-These tasks are waiting for their dependencies to complete.
-Check the design document for dependency configuration.
 """,
         }
 
-    # Should not reach here, but approve if nothing to do
+    # Still work to do
+    status.iteration += 1
     status.save(status_path)
-    return {"decision": "approve"}
+    pending = get_current_layer_tasks(status)
+    prompt = build_continue_prompt(status, pending)
+    return {
+        "decision": "block",
+        "reason": prompt,
+    }
 
 
 def main():
-    """Entry point - read stdin, route to appropriate handler, output result."""
+    """Entry point - read stdin, process Stop event, output decision."""
     try:
         input_data = json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):
         input_data = {}
 
-    # Route based on event type
-    event_name = input_data.get("hook_event_name", "Stop")
-
-    if event_name == "SubagentStop":
-        result = handle_subagent_stop(input_data)
-    else:
-        # Stop event (or unknown - treat as Stop)
-        result = handle_stop_event(input_data)
-
+    result = handle_stop_event(input_data)
     print(json.dumps(result))
 
 

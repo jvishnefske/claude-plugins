@@ -338,10 +338,7 @@ test_pattern = "test_.*"           # Optional: Regex for test names
 if __name__ == "__main__":
     import json
     import sys
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
+    import tomllib
 
     if len(sys.argv) < 2:
         print(get_schema_for_agent())
