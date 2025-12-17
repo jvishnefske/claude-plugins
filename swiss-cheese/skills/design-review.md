@@ -1,10 +1,10 @@
 ---
-description: Use this skill when the user needs guidance on conducting upfront design reviews for safety-critical Rust components, asking requirements questions, or generating design specifications.
+description: Use this skill when the user needs guidance on conducting upfront design reviews for production-grade Rust components, asking requirements questions, or generating design specifications.
 ---
 
 # Design Review Skill
 
-This skill provides guidance for conducting comprehensive upfront design reviews for safety-critical Rust components.
+This skill provides guidance for conducting comprehensive upfront design reviews for production-grade Rust components.
 
 ## Purpose
 

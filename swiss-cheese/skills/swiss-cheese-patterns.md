@@ -1,10 +1,10 @@
 ---
-description: Use this skill when the user needs guidance on safe Rust patterns, newtype wrappers, type-state machines, error handling, no-panic code, Kani harnesses, or Clippy configuration for safety-critical development.
+description: Use this skill when the user needs guidance on safe Rust patterns, newtype wrappers, type-state machines, error handling, no-panic code, Kani harnesses, or Clippy configuration for production-grade development.
 ---
 
 # Safe Rust Patterns Skill
 
-This skill provides patterns for writing safety-critical Rust code that passes all verification layers.
+This skill provides patterns for writing production-grade Rust code that passes all verification layers.
 
 ## Core Principles
 
@@ -100,7 +100,7 @@ pub enum MotorError {
 }
 
 impl MotorError {
-    pub const fn is_safety_critical(&self) -> bool {
+    pub const fn is_critical(&self) -> bool {
         matches!(self, Self::HardwareFault(_))
     }
 }

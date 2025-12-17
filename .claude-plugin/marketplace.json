@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "swiss-cheese-plugins",
+  "name": "jvishnefske-agent-plugins",
   "version": "1.0.0",
   "description": "Swiss Cheese Model verification plugins for Rust development using multi-layer AI agents",
   "owner": {

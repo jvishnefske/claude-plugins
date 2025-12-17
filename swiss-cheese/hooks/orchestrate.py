@@ -154,6 +154,120 @@ def create_worktree(task_name: str, branch: str) -> Path | None:
         return None
 
 
+def get_main_branch() -> str:
+    """Get the name of the main branch (main or master)."""
+    try:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+            cwd=PROJECT_DIR, capture_output=True
+        )
+        if result.returncode == 0:
+            # refs/remotes/origin/main -> main
+            return result.stdout.decode().strip().split("/")[-1]
+    except Exception:
+        pass
+
+    # Fallback: check if main or master exists
+    for branch in ["main", "master"]:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", branch],
+            cwd=PROJECT_DIR, capture_output=True
+        )
+        if result.returncode == 0:
+            return branch
+
+    return "main"
+
+
+def rebase_worktree_to_main(task: dict) -> tuple[bool, str]:
+    """Rebase a task's worktree branch onto main and merge.
+
+    Returns (success, message).
+    """
+    worktree_path = task.get("worktree_path")
+    branch = task.get("branch")
+
+    if not worktree_path or not branch:
+        return True, "No worktree to rebase"
+
+    worktree = Path(worktree_path)
+    if not worktree.exists():
+        return True, "Worktree doesn't exist"
+
+    main_branch = get_main_branch()
+
+    try:
+        # 1. Fetch latest main in the worktree
+        subprocess.run(
+            ["git", "fetch", "origin", main_branch],
+            cwd=worktree, capture_output=True, check=True
+        )
+
+        # 2. Rebase the task branch onto main
+        result = subprocess.run(
+            ["git", "rebase", f"origin/{main_branch}"],
+            cwd=worktree, capture_output=True
+        )
+
+        if result.returncode != 0:
+            # Rebase conflict - abort and report
+            subprocess.run(["git", "rebase", "--abort"], cwd=worktree, capture_output=True)
+            return False, f"Rebase conflict in {branch}: {result.stderr.decode()[:200]}"
+
+        # 3. Switch to main in the main project dir and merge
+        subprocess.run(
+            ["git", "checkout", main_branch],
+            cwd=PROJECT_DIR, capture_output=True, check=True
+        )
+
+        # 4. Merge the rebased branch (fast-forward if possible)
+        result = subprocess.run(
+            ["git", "merge", "--ff-only", branch],
+            cwd=PROJECT_DIR, capture_output=True
+        )
+
+        if result.returncode != 0:
+            # Try regular merge if ff fails
+            result = subprocess.run(
+                ["git", "merge", branch, "-m", f"[swiss-cheese] Merge {branch}"],
+                cwd=PROJECT_DIR, capture_output=True
+            )
+            if result.returncode != 0:
+                return False, f"Merge failed for {branch}: {result.stderr.decode()[:200]}"
+
+        # 5. Clean up worktree
+        subprocess.run(
+            ["git", "worktree", "remove", str(worktree)],
+            cwd=PROJECT_DIR, capture_output=True
+        )
+
+        return True, f"Merged {branch} into {main_branch}"
+
+    except subprocess.CalledProcessError as e:
+        return False, f"Git error: {e}"
+    except Exception as e:
+        return False, str(e)
+
+
+def rebase_layer_tasks(status: OrchestratorStatus, layer: str) -> list[str]:
+    """Rebase all passed tasks for a layer back to main.
+
+    Returns list of error messages (empty if all succeeded).
+    """
+    errors = []
+
+    for task_name, task in status.tasks.items():
+        if task["layer"] == layer and task["status"] == TaskStatus.PASSED.value:
+            success, message = rebase_worktree_to_main(task)
+            if not success:
+                errors.append(f"{task_name}: {message}")
+            else:
+                # Clear worktree path since it's been cleaned up
+                task["worktree_path"] = None
+
+    return errors
+
+
 def check_worktree_has_new_commits(worktree_path: Path, since_hash: str | None) -> bool:
     """Check if worktree has new commits since a given hash."""
     if not worktree_path.exists():
@@ -603,6 +717,21 @@ def handle_subagent_stop(input_data: dict) -> dict:
                     if req_id in status.traceability:
                         status.traceability[req_id]["status"] = "verified"
 
+        # Rebase passed tasks back to main branch
+        rebase_errors = rebase_layer_tasks(status, layer)
+        if rebase_errors:
+            # Rebase failed - report but don't block (tasks already passed gate)
+            error_msg = "\n".join(rebase_errors)
+            status.save(status_path)
+            return {
+                "continue": True,
+                "systemMessage": f"""[Swiss Cheese] Gate '{layer}' passed but rebase failed:
+
+{error_msg}
+
+Please manually resolve conflicts and merge the branches.""",
+            }
+
         # Check if layer is now complete
         if all_layer_tasks_complete(status, layer):
             next_layer = get_next_layer(layer)
@@ -777,6 +906,20 @@ If the subagents have finished, ensure they committed their changes.
                     for req_id in status.tasks[task_name].get("requirements", []):
                         if req_id in status.traceability:
                             status.traceability[req_id]["status"] = "verified"
+
+            # Rebase passed tasks back to main branch
+            rebase_errors = rebase_layer_tasks(status, status.current_layer)
+            if rebase_errors:
+                error_msg = "\n".join(rebase_errors)
+                status.save(status_path)
+                return {
+                    "decision": "block",
+                    "reason": f"""[Swiss Cheese] Gate passed but rebase failed:
+
+{error_msg}
+
+Please manually resolve conflicts and merge the branches, then try again.""",
+                }
         else:
             gate["status"] = GateStatus.FAILED.value
             # Mark tasks as failed, allow retry

@@ -6,7 +6,7 @@ arguments:
     required: false
 ---
 
-You are starting a safety-critical development session using the Swiss Cheese Model.
+You are starting a verified development session using the Swiss Cheese Model.
 
 ## Swiss Cheese Model Overview
 

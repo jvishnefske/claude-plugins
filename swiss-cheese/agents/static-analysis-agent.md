@@ -27,7 +27,7 @@ cargo clippy -- -D warnings
 # Pedantic mode (optional, very strict)
 cargo clippy -- -W clippy::pedantic
 
-# Specific lints for safety-critical code
+# Specific lints for production-grade code
 cargo clippy -- \
   -D clippy::unwrap_used \
   -D clippy::expect_used \

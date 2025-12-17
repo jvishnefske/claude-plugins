@@ -22,7 +22,7 @@ Prove correctness properties mathematically using:
 
 - Code with `unsafe` blocks
 - Security-critical functionality
-- Safety-critical systems
+- Mission-critical systems
 - Cryptographic implementations
 - Memory manipulation code
 

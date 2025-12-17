@@ -96,7 +96,7 @@ make validate-{{gate_name}}
 
 **This layer is optional**. Skip with justification if:
 - No unsafe code
-- No safety-critical invariants
+- No critical invariants
 - Kani not available
 
 {{else if (eq gate_name "dynamic-analysis")}}

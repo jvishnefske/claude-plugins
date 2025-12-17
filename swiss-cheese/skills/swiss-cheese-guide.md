@@ -1,10 +1,10 @@
 ---
-description: Use this skill when the user asks about "Swiss Cheese Model", "safety-critical Rust", "verification layers", "how to use swiss-cheese plugin", "rust verification workflow", "9-layer verification", "Makefile gates", or needs guidance on using the Swiss Cheese verification plugin.
+description: Use this skill when the user asks about "Swiss Cheese Model", "verified Rust", "verification layers", "how to use swiss-cheese plugin", "rust verification workflow", "9-layer verification", "Makefile gates", or needs guidance on using the Swiss Cheese verification plugin.
 ---
 
-# Swiss Cheese Model - Safety-Critical Development Guide
+# Swiss Cheese Model - Verified Development Guide
 
-The Swiss Cheese Model plugin implements a 9-layer verification approach for safety-critical development, inspired by NASA's Swiss Cheese Model for accident prevention.
+The Swiss Cheese Model plugin implements a 9-layer verification approach for verified development, inspired by NASA's Swiss Cheese Model for accident prevention.
 
 ## Core Concept
 

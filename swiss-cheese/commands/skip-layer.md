@@ -18,12 +18,12 @@ Only certain layers can be skipped:
 
 **Can skip if**:
 - No `unsafe` blocks in codebase: `grep -r "unsafe" src/ | wc -l` = 0
-- No safety-critical invariants documented
+- No critical invariants documented
 - Kani/Prusti not available for target platform
 
 **Cannot skip if**:
 - Contains `unsafe` code
-- Safety-critical requirements exist
+- Critical requirements exist
 - Security-critical functionality
 
 ### All Other Layers
@@ -40,7 +40,7 @@ Layers 1-5 and 7-9 **cannot be skipped** - they form the core verification chain
 # Check for unsafe code
 grep -r "unsafe" src/ --include="*.rs" | wc -l
 
-# Check requirements for safety-critical flags
+# Check requirements for criticality flags
 grep -i "safety\|critical" design.toml
 ```
 
@@ -64,7 +64,7 @@ Justification: {{justification}}
 
 Validation:
 - No unsafe code found: ✓
-- Not safety-critical: ✓
+- Not critical: ✓
 
 Proceeding to next layer (dynamic_analysis).
 ```
