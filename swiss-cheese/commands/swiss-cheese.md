@@ -1,113 +1,124 @@
 ---
-description: Start safety-critical Rust development with design review
+description: Path to design document (TOML or markdown)
 arguments:
   - name: design_doc
-    description: Path to design document (TOML or markdown)
+    description: Path to design document (TOML)
     required: false
 ---
 
-You are starting a safety-critical Rust development session using the Swiss Cheese Model with **concurrent task orchestration**.
+You are starting a verified development session using the Swiss Cheese Model.
 
 ## Swiss Cheese Model Overview
 
-Like the NASA Swiss Cheese Model for accident prevention, this workflow uses 9 independent verification layers. Each layer catches defects that slip through previous layers - no single point of failure.
+Like the NASA Swiss Cheese Model for accident prevention, this workflow uses 9 independent verification layers. Each layer catches defects that slip through previous layers.
 
 ```
-Layer 1: Requirements    → Formalize requirements with Rust-specific constraints
+Layer 1: Requirements    → Formalize requirements with testable criteria
 Layer 2: Architecture    → Design type-safe, ownership-correct architecture
 Layer 3: TDD             → Write comprehensive tests BEFORE implementation
-Layer 4: Implementation  → Implement safe Rust code to pass tests
-Layer 5: Static Analysis → Run Clippy, cargo-audit, cargo-deny, unsafe audit
-Layer 6: Formal Verify   → Prove properties with Kani, Prusti, Creusot
-Layer 7: Dynamic Analysis→ Run Miri, fuzzing, coverage, timing analysis
+Layer 4: Implementation  → Implement code to pass tests
+Layer 5: Static Analysis → Run Clippy, cargo-audit, cargo-deny
+Layer 6: Formal Verify   → Prove properties with Kani (optional)
+Layer 7: Dynamic Analysis→ Run Miri, fuzzing, coverage analysis
 Layer 8: Review          → Independent fresh-eyes review
 Layer 9: Safety Case     → Assemble safety case and make release decision
 ```
 
-## Concurrent Task Orchestration
+## Orchestration Architecture
 
-The orchestrator uses **topological sorting** to identify tasks that can run in parallel:
-- Tasks with satisfied dependencies are dispatched concurrently
-- Each task runs in its own **git worktree** branch
-- Validators run after each task to verify success
-- Failed tasks are automatically retried (up to max_iterations)
-- Completed branches are rebased in dependency order
+The orchestrator runs on **Stop events only** and:
+1. Validates the TOML design document against the schema
+2. Tracks task/gate status in `/tmp` (invisible to you)
+3. Runs **Makefile targets** for gate validation
+4. Generates **traceability matrix** from test results
+5. Blocks and continues until all gates pass
 
 ## Your Task
 
 {{#if design_doc}}
-1. Read and analyze the design document at: {{design_doc}}
-2. Initialize the orchestrator with the design document
-3. Display the task dependency graph
-4. Begin orchestrated execution
-
-**Initialize orchestrator:**
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py init "{{design_doc}}"
-```
+1. Read the design document at: `{{design_doc}}`
+2. Validate it matches the expected TOML schema
+3. If valid, begin working on tasks for the current layer
+4. The orchestrator will guide you through each layer
 {{else}}
-1. Look for existing design documents: `design.toml`, `requirements.toml`, `swiss-cheese.toml`
-2. If none found, help the user create one (see `examples/example_project.toml`)
-3. Initialize the orchestrator once a design document exists
+1. Look for design documents: `design.toml`, `swiss-cheese.toml`, `requirements.toml`
+2. If none found, help create one using the schema below
+3. Also create a `Makefile` with gate validation targets (see `examples/Makefile.swiss-cheese`)
 {{/if}}
 
-## Design Document Format (TOML)
-
-The design document defines layers, tasks, validators, and orchestration settings:
+## Design Document Schema (TOML)
 
 ```toml
 [project]
-name = "my-project"
-max_iterations = 5          # Retry failed tasks
-max_parallel_agents = 4     # Concurrent worktrees
+name = "project-name"           # Required
+version = "0.1.0"               # Required
+max_iterations = 5              # Optional, default 5
+max_parallel_agents = 4         # Optional, default 4
 
-[layers.implementation]
-description = "Implement safe Rust code"
-depends_on = ["tdd"]
-validators = ["cargo_test", "cargo_build"]
+[[requirements]]
+id = "REQ-001"                  # Required: unique ID matching REQ-NNN
+title = "Short title"           # Required
+description = "Full description" # Required
+priority = "high"               # Optional: critical|high|medium|low
+acceptance_criteria = [         # Required: testable criteria
+    "Criterion 1",
+    "Criterion 2",
+]
 
-[tasks.implement_core]
-layer = "implementation"
-description = "Implement core functionality"
-depends_on = ["write_tests"]
-agent = "implementation-agent"
+[tasks.task_name]
+layer = "implementation"        # Required: one of 9 layers
+description = "What this does"  # Required
+depends_on = ["other_task"]     # Optional: task dependencies
+requirements = ["REQ-001"]      # Optional: requirement IDs
+agent = "implementation-agent"  # Optional: agent type
+command = "cargo test"          # Optional: validation command
 
-[validators]
-cargo_test = "cargo test"
-cargo_build = "cargo build"
-
-[worktree]
-branch_prefix = "swiss-cheese"
-cleanup_on_success = true
+[gates.layer_name]
+target = "validate-layer"       # Required: Makefile target
 ```
 
-## Session State
+## Makefile Requirements
 
-The orchestrator maintains state in `.claude/orchestrator_state.json`:
-- Task statuses (pending, running, validating, passed, failed)
-- Current batch of concurrent tasks
-- Completed branches ready for rebase
-- Validation errors for retry
+Your project needs a `Makefile` with targets for each layer:
 
-Check status anytime with:
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py status
+```makefile
+validate-requirements:    # Layer 1
+validate-architecture:    # Layer 2
+validate-tdd:             # Layer 3
+validate-implementation:  # Layer 4 - cargo build && cargo test
+validate-static-analysis: # Layer 5 - cargo clippy, audit, deny
+validate-formal-verification:  # Layer 6 (optional)
+validate-dynamic-analysis:     # Layer 7 - miri, coverage
+validate-review:          # Layer 8
+validate-safety-case:     # Layer 9
 ```
 
-## Next Steps
+See `examples/Makefile.swiss-cheese` for a complete template.
 
-After design review:
-1. `/swiss-cheese:status` - View current task status
-2. `/swiss-cheese:loop` - Run orchestrated execution until complete
-3. `/swiss-cheese:gate <layer>` - Run specific layer manually
+## How It Works
 
-Or let the orchestrator dispatch tasks automatically via hooks.
+1. You work on tasks for the current layer
+2. When you try to stop, the orchestrator checks gate status
+3. It runs `make validate-<layer>` to verify the gate
+4. If the gate fails, you're prompted to fix issues and continue
+5. If the gate passes, you advance to the next layer
+6. This continues until all 9 layers pass
 
-## Reset State
+## Commands
 
-To start fresh:
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py reset
-```
+- `/swiss-cheese:status` - View current layer and task status
+- `/swiss-cheese:loop` - Continue orchestrated execution
+- `/swiss-cheese:gate <layer>` - Run specific gate manually
+- `/swiss-cheese:skip-layer <reason>` - Skip optional layer with justification
+- `/swiss-cheese:cancel` - Cancel orchestration
 
-Remember: The goal is defense in depth with maximum parallelism. Each layer is independent and thorough.
+## Traceability
+
+The orchestrator maintains a traceability matrix linking:
+- Requirements (REQ-001, etc.)
+- Tasks that address each requirement
+- Tests that verify each requirement
+
+Name your tests like `test_req_001_*` for automatic traceability.
+
+Final report saved to `.claude/traceability_matrix.json` on completion.

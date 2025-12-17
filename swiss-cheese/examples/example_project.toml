@@ -1,353 +1,239 @@
 # Swiss Cheese Model - Software Design Document
-# This TOML file defines verification layers, tasks, and dependencies
-# for production Rust development with concurrent task orchestration.
+# This TOML file defines requirements, verification tasks, and gate configurations
+# for production software development with the 9-layer Swiss Cheese Model.
 #
 # Usage:
-# 1. Copy this file to your project root as `design.toml` or `swiss-cheese.toml`
-# 2. Customize layers, tasks, and validators for your project
-# 3. Run `/swiss-cheese:swiss-cheese design.toml` to start
-# 4. The orchestrator will spawn concurrent subagents in git worktrees
+# 1. Copy this file to your project root as `design.toml`
+# 2. Copy Makefile.swiss-cheese to `Makefile` and customize
+# 3. Run `/swiss-cheese` to start orchestration
+# 4. The orchestrator validates gates via Makefile targets
 
 [project]
 name = "example-production-system"
 version = "0.1.0"
-language = "rust"
 description = "Example project demonstrating Swiss Cheese verification model"
-
-# Orchestration settings
 max_iterations = 5          # Max retries per task before failing
-max_parallel_agents = 4     # Max concurrent subagents (worktrees)
+max_parallel_agents = 4     # Max concurrent subagents
 
-# Rust toolchain requirements
-[project.toolchain]
-rust = "1.75.0"
-edition = "2021"
+# =============================================================================
+# REQUIREMENTS
+# Each requirement has a unique ID, testable criteria, and traceability info
+# =============================================================================
 
-# Additional language support (optional)
-[project.additional_languages]
-cpp = { standard = "c++17", checker = "clang-tidy", checks = ["hicpp-*", "modernize-*"] }
+[[requirements]]
+id = "REQ-001"
+title = "Safe Input Parsing"
+description = "The system must safely parse untrusted input without panics or undefined behavior"
+priority = "critical"
+acceptance_criteria = [
+    "All input parsing functions handle malformed input gracefully",
+    "No panics on any valid or invalid input",
+    "Property-based tests cover edge cases",
+    "Miri finds no undefined behavior",
+]
+traces_to = ["REQ-002"]
 
-# ============================================================================
-# VERIFICATION LAYERS (Swiss Cheese Slices)
-# Each layer catches different classes of defects
-# ============================================================================
+[[requirements]]
+id = "REQ-002"
+title = "Memory Safety"
+description = "All operations must be memory-safe with no leaks or use-after-free"
+priority = "critical"
+acceptance_criteria = [
+    "Zero unsafe blocks, or all unsafe blocks justified and audited",
+    "Miri passes on all tests",
+    "cargo-geiger reports acceptable unsafe usage",
+]
 
-[layers.requirements]
-name = "Requirements Formalization"
-description = "Formalize requirements with Rust-specific constraints"
-order = 1
-validators = []  # No automated validators - human review
-reports = ["json", "html"]
+[[requirements]]
+id = "REQ-003"
+title = "Bounded Resource Usage"
+description = "CPU and memory usage must be bounded and predictable"
+priority = "high"
+acceptance_criteria = [
+    "No unbounded allocations",
+    "All loops have provable termination",
+    "Stack usage is bounded",
+]
 
-[layers.architecture]
-name = "Architecture Design"
-description = "Design type-safe, ownership-correct architecture"
-order = 2
-depends_on = ["requirements"]
-validators = []  # No automated validators - human review
-reports = ["json"]
+[[requirements]]
+id = "REQ-004"
+title = "Error Handling"
+description = "All errors must be handled explicitly without silent failures"
+priority = "high"
+acceptance_criteria = [
+    "No unwrap() or expect() in production code",
+    "All Result types are handled",
+    "Error messages are informative",
+]
 
-[layers.tdd]
-name = "Test-Driven Development"
-description = "Write comprehensive tests BEFORE implementation"
-order = 3
-depends_on = ["architecture"]
-validators = ["cargo_test"]  # Tests must compile (but may fail - TDD)
-reports = ["json", "xml"]
+[[requirements]]
+id = "REQ-005"
+title = "Test Coverage"
+description = "Code must have comprehensive test coverage"
+priority = "medium"
+acceptance_criteria = [
+    "Line coverage >= 80%",
+    "All public APIs have unit tests",
+    "Integration tests cover main workflows",
+]
 
-[layers.implementation]
-name = "Implementation"
-description = "Implement safe Rust code to pass tests"
-order = 4
-depends_on = ["tdd"]
-validators = ["cargo_test", "cargo_build"]  # Tests must pass
-reports = ["json"]
-
-[layers.static_analysis]
-name = "Static Analysis"
-description = "Run Clippy, cargo-audit, cargo-deny, unsafe audit"
-order = 5
-depends_on = ["implementation"]
-validators = ["clippy", "audit", "deny", "geiger"]
-reports = ["json", "html"]
-
-[layers.formal_verification]
-name = "Formal Verification"
-description = "Prove properties with Kani, Prusti, Creusot"
-order = 6
-depends_on = ["static_analysis"]
-validators = ["kani"]
-reports = ["json"]
-optional = true  # May be skipped with justification
-
-[layers.dynamic_analysis]
-name = "Dynamic Analysis"
-description = "Run Miri, fuzzing, coverage, timing analysis"
-order = 7
-depends_on = ["implementation"]  # Can run parallel to formal verification
-validators = ["miri", "coverage"]
-reports = ["json", "html"]
-
-[layers.review]
-name = "Independent Review"
-description = "Fresh-eyes review by independent agent"
-order = 8
-depends_on = ["static_analysis", "dynamic_analysis"]
-validators = []  # Agent-based review
-reports = ["json", "html"]
-
-[layers.safety]
-name = "Safety Case Assembly"
-description = "Assemble safety case and make release decision"
-order = 9
-depends_on = ["review", "formal_verification"]
-validators = []  # Human sign-off required
-reports = ["json", "html"]
-
-# ============================================================================
-# COMPONENT TASKS
-# Fine-grained tasks within layers, with explicit dependencies
-# Each task runs in its own git worktree branch for concurrent execution
-# Branch names default to: {branch_prefix}/{task_name}
-# ============================================================================
+# =============================================================================
+# TASKS
+# Tasks are organized by layer with explicit dependencies
+# Each task references requirements it addresses
+# =============================================================================
 
 [tasks.parse_requirements]
 layer = "requirements"
-description = "Parse and validate requirement specifications"
+description = "Parse and validate requirement specifications from this document"
 depends_on = []
+requirements = ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005"]
 agent = "requirements-agent"
-branch = "swiss-cheese/requirements/parse"  # Optional: custom branch name
 
 [tasks.formalize_constraints]
 layer = "requirements"
-description = "Formalize Rust-specific type and ownership constraints"
+description = "Formalize type and ownership constraints for each requirement"
 depends_on = ["parse_requirements"]
+requirements = ["REQ-002", "REQ-003"]
 agent = "requirements-agent"
-# branch auto-generated: swiss-cheese/formalize_constraints
 
 [tasks.design_modules]
 layer = "architecture"
 description = "Design module structure with clear ownership boundaries"
 depends_on = ["formalize_constraints"]
+requirements = ["REQ-002"]
 agent = "architecture-agent"
 
 [tasks.define_interfaces]
 layer = "architecture"
 description = "Define public interfaces and trait contracts"
 depends_on = ["design_modules"]
+requirements = ["REQ-001", "REQ-004"]
 agent = "architecture-agent"
 
-# TDD tasks - write_unit_tests and write_property_tests can run in PARALLEL
-# because they both only depend on define_interfaces (no interdependency)
 [tasks.write_unit_tests]
 layer = "tdd"
 description = "Write unit tests for all public interfaces"
 depends_on = ["define_interfaces"]
-agent = "tdd-agent"
-
-[tasks.write_integration_tests]
-layer = "tdd"
-description = "Write integration tests for module interactions"
-depends_on = ["write_unit_tests"]
+requirements = ["REQ-005"]
 agent = "tdd-agent"
 
 [tasks.write_property_tests]
 layer = "tdd"
-description = "Write property-based tests with proptest/quickcheck"
-depends_on = ["define_interfaces"]  # Can run parallel to write_unit_tests
+description = "Write property-based tests with proptest for edge cases"
+depends_on = ["define_interfaces"]
+requirements = ["REQ-001", "REQ-005"]
 agent = "tdd-agent"
 
 [tasks.implement_core]
 layer = "implementation"
-description = "Implement core functionality to pass tests"
+description = "Implement core functionality to pass all tests"
 depends_on = ["write_unit_tests", "write_property_tests"]
-agent = "implementation-agent"
-
-[tasks.implement_integrations]
-layer = "implementation"
-description = "Implement integration points"
-depends_on = ["implement_core", "write_integration_tests"]
+requirements = ["REQ-001", "REQ-002", "REQ-004"]
 agent = "implementation-agent"
 
 [tasks.run_clippy]
 layer = "static_analysis"
 description = "Run clippy with all warnings as errors"
-depends_on = ["implement_integrations"]
+depends_on = ["implement_core"]
+requirements = ["REQ-002", "REQ-004"]
 agent = "static-analysis-agent"
 command = "cargo clippy --all-targets --all-features -- -D warnings"
 
 [tasks.run_cargo_audit]
 layer = "static_analysis"
 description = "Audit dependencies for security vulnerabilities"
-depends_on = ["implement_integrations"]
+depends_on = ["implement_core"]
+requirements = ["REQ-002"]
 agent = "static-analysis-agent"
 command = "cargo audit"
-
-[tasks.run_cargo_deny]
-layer = "static_analysis"
-description = "Check dependency licenses and advisories"
-depends_on = ["implement_integrations"]
-agent = "static-analysis-agent"
-command = "cargo deny check"
 
 [tasks.audit_unsafe]
 layer = "static_analysis"
 description = "Audit all unsafe blocks with justification"
-depends_on = ["implement_integrations"]
+depends_on = ["implement_core"]
+requirements = ["REQ-002"]
 agent = "static-analysis-agent"
 command = "cargo geiger --all-features"
 
 [tasks.run_miri]
 layer = "dynamic_analysis"
 description = "Run Miri for undefined behavior detection"
-depends_on = ["implement_integrations"]
+depends_on = ["implement_core"]
+requirements = ["REQ-001", "REQ-002"]
 agent = "dynamic-analysis-agent"
 command = "cargo +nightly miri test"
-
-[tasks.run_fuzzing]
-layer = "dynamic_analysis"
-description = "Run cargo-fuzz on critical interfaces"
-depends_on = ["implement_integrations"]
-agent = "dynamic-analysis-agent"
 
 [tasks.measure_coverage]
 layer = "dynamic_analysis"
 description = "Measure test coverage with cargo-llvm-cov"
-depends_on = ["implement_integrations"]
+depends_on = ["implement_core"]
+requirements = ["REQ-005"]
 agent = "dynamic-analysis-agent"
-command = "cargo llvm-cov --all-features --html"
+command = "cargo llvm-cov --all-features --json --output-path coverage.json"
 
 [tasks.run_kani]
 layer = "formal_verification"
 description = "Run Kani model checker on critical functions"
 depends_on = ["run_clippy"]
+requirements = ["REQ-003"]
 agent = "formal-verification-agent"
 command = "cargo kani"
-optional = true
 
 [tasks.independent_review]
 layer = "review"
 description = "Fresh-eyes code review by independent agent"
 depends_on = ["run_clippy", "run_cargo_audit", "measure_coverage"]
+requirements = ["REQ-001", "REQ-002", "REQ-003", "REQ-004"]
 agent = "review-agent"
 
 [tasks.assemble_safety_case]
 layer = "safety"
 description = "Compile all verification evidence into safety case"
 depends_on = ["independent_review", "run_kani"]
+requirements = ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005"]
 agent = "safety-agent"
 
-# ============================================================================
-# GATE CONFIGURATIONS
-# Command-line verification with return codes
-# ============================================================================
+# =============================================================================
+# GATES
+# Gate configurations with Makefile targets for validation
+# =============================================================================
 
-[gates]
-# All gates must return 0 for success, non-zero for failure
-# Gates can produce reports in json, xml, html formats
+[gates.requirements]
+target = "validate-requirements"
 
-[gates.static_analysis]
-commands = [
-    { name = "clippy", cmd = "cargo clippy --all-targets -- -D warnings --message-format=json", output = "json" },
-    { name = "audit", cmd = "cargo audit --json", output = "json" },
-    { name = "deny", cmd = "cargo deny check --format json", output = "json" },
-]
-fail_fast = true  # Stop on first failure
+[gates.architecture]
+target = "validate-architecture"
 
 [gates.tdd]
-commands = [
-    { name = "tests", cmd = "cargo test --no-fail-fast -- --format json -Z unstable-options", output = "json" },
-]
-min_coverage = 80  # Minimum test coverage percentage
+target = "validate-tdd"
+
+[gates.implementation]
+target = "validate-implementation"
+
+[gates.static_analysis]
+target = "validate-static-analysis"
+fail_fast = true
+
+[gates.formal_verification]
+target = "validate-formal-verification"
 
 [gates.dynamic_analysis]
-commands = [
-    { name = "miri", cmd = "cargo +nightly miri test 2>&1", output = "text" },
-    { name = "coverage", cmd = "cargo llvm-cov --json --output-path coverage.json", output = "json" },
-]
+target = "validate-dynamic-analysis"
+min_coverage = 80
 
-# ============================================================================
-# VALIDATORS
-# Named validator commands used by layers for task validation
-# These are run after each task to verify success
-# ============================================================================
+[gates.review]
+target = "validate-review"
 
-[validators]
-# Build validators
-cargo_build = "cargo build --all-targets"
-cargo_test = "cargo test"
-cargo_check = "cargo check --all-targets"
+[gates.safety]
+target = "validate-safety-case"
 
-# Static analysis validators
-clippy = "cargo clippy --all-targets --all-features -- -D warnings"
-audit = "cargo audit"
-deny = "cargo deny check"
-geiger = "cargo geiger --all-features"
+# =============================================================================
+# TRACEABILITY
+# Configuration for requirement-to-test traceability
+# =============================================================================
 
-# Dynamic analysis validators
-miri = "cargo +nightly miri test"
-coverage = "cargo llvm-cov --all-features"
-
-# Formal verification validators
-kani = "cargo kani"
-
-# ============================================================================
-# WORKTREE CONFIGURATION
-# Git worktree settings for concurrent subagent execution
-# ============================================================================
-
-[worktree]
-base_path = ".worktrees"
-branch_prefix = "swiss-cheese"
-cleanup_on_success = true
-rebase_strategy = "linear"  # linear or merge
-
-# ============================================================================
-# AGENT CONFIGURATION
-# Subagent definitions for each verification role
-# ============================================================================
-
-[agents.requirements-agent]
-description = "Formalizes requirements with Rust-specific constraints"
-model = "sonnet"
-tools = ["Read", "Write", "Grep", "Glob"]
-
-[agents.architecture-agent]
-description = "Designs type-safe, ownership-correct architecture"
-model = "sonnet"
-tools = ["Read", "Write", "Grep", "Glob", "WebSearch"]
-
-[agents.tdd-agent]
-description = "Writes comprehensive tests BEFORE implementation"
-model = "sonnet"
-tools = ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
-
-[agents.implementation-agent]
-description = "Implements safe Rust code to pass tests"
-model = "sonnet"
-tools = ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
-
-[agents.static-analysis-agent]
-description = "Runs Clippy, cargo-audit, cargo-deny, unsafe audit"
-model = "haiku"  # Faster model for automated checks
-tools = ["Read", "Bash", "Grep", "Glob"]
-
-[agents.dynamic-analysis-agent]
-description = "Runs Miri, fuzzing, coverage, timing analysis"
-model = "haiku"
-tools = ["Read", "Bash", "Grep", "Glob"]
-
-[agents.formal-verification-agent]
-description = "Proves properties with Kani, Prusti, Creusot"
-model = "sonnet"
-tools = ["Read", "Write", "Bash", "Grep", "Glob"]
-
-[agents.review-agent]
-description = "Independent fresh-eyes review"
-model = "opus"  # Most capable model for thorough review
-tools = ["Read", "Grep", "Glob", "WebSearch"]
-
-[agents.safety-agent]
-description = "Assembles safety case and makes release decision"
-model = "opus"
-tools = ["Read", "Write", "Grep", "Glob"]
+[traceability]
+enabled = true
+report_formats = ["json", "html"]
+test_pattern = "test_req_\\d+.*"  # Tests should be named test_req_001_*, etc.

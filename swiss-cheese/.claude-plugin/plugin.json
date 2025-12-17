@@ -1,7 +1,7 @@
 {
   "name": "swiss-cheese",
   "version": "1.0.0",
-  "description": "Safety-critical Rust development using the NASA Swiss Cheese Model. Full lifecycle from requirements validation through CI verification with 9 independent verification layers.",
+  "description": "Production-grade Rust development using the NASA Swiss Cheese Model. Full lifecycle from requirements validation through CI verification with 9 independent verification layers.",
   "author": {
     "name": "Swiss Cheese Project",
     "email": "support@example.com"

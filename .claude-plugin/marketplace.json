@@ -1,8 +1,8 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "swiss-cheese-plugins",
+  "name": "jvishnefske-agent-plugins",
   "version": "1.0.0",
-  "description": "Swiss Cheese Model verification plugins for safety-critical Rust development using multi-layer AI agents",
+  "description": "Swiss Cheese Model verification plugins for Rust development using multi-layer AI agents",
   "owner": {
     "name": "Swiss Cheese Project",
     "email": "support@example.com"
@@ -10,11 +10,11 @@
   "plugins": [
     {
       "name": "swiss-cheese",
-      "description": "Safety-critical Rust development using the NASA Swiss Cheese Model. Full lifecycle from requirements validation through CI verification with 9 independent verification layers.",
+      "description": "Agentic Rust development using the NASA Swiss Cheese Model. Full lifecycle from requirements validation through CI verification with 9 independent verification layers.",
       "version": "1.0.0",
       "author": {
         "name": "Swiss Cheese Project",
-        "email": "support@example.com"
+        "email": "jvishnefske@gmail.com"
       },
       "source": "./swiss-cheese",
       "category": "development"

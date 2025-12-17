@@ -4,37 +4,66 @@ description: Cancel the current verification loop
 
 You are canceling the current Swiss Cheese verification loop.
 
-## Actions
+## Cancellation Process
 
-1. Read current state from `/tmp/swiss_cheese_state.json`
-2. Display final status summary
-3. Preserve the state file (don't delete - user may want to resume)
-4. Confirm cancellation
+To cancel orchestration, you have two options:
+
+### Option 1: Rename/Remove Design Document
+
+```bash
+mv design.toml design.toml.disabled
+```
+
+Without a valid design document, the Stop hook will allow the session to end.
+
+### Option 2: Force Exit
+
+The orchestrator only blocks on Stop events. If you simply need to pause:
+1. Note the current layer and progress
+2. The status in `/tmp/swiss_cheese_<hash>.json` is preserved
+3. Resuming later will continue from the same point
+
+## Current Status
+
+Before canceling, check current progress:
+
+```bash
+# Run each gate to see status
+make validate-requirements
+make validate-architecture
+make validate-tdd
+make validate-implementation
+```
 
 ## Output Format
+
+Report the cancellation status:
 
 ```
 Swiss Cheese Loop Cancelled
 ===========================
 
-Final Status:
-  Passed Gates: X/9
-  - requirements: PASS
-  - architecture: PASS
-  - tdd: PASS
-  - implementation: PENDING (was in progress)
-  ...
+Current Layer: <layer_name>
 
-Modified Files: X files tracked
-State preserved in: /tmp/swiss_cheese_state.json
+Gates Passed:
+[x] requirements
+[x] architecture
+[ ] tdd
+[ ] implementation
+...
 
-To resume: /swiss-cheese:loop
-To start fresh: Delete state file and run /swiss-cheese
+To resume later:
+1. Ensure design.toml exists
+2. Run /swiss-cheese:loop
+
+To start fresh:
+1. Delete design.toml
+2. Create new design document
+3. Run /swiss-cheese
 ```
 
-## Cleanup
+## Notes
 
-- Do NOT delete the state file
-- Stop any running gate processes
-- Clear any "in progress" markers
-- Report final state to user
+- Status file in `/tmp` is preserved for resumption
+- No cleanup of worktrees or branches occurs
+- Progress can be resumed by simply continuing work

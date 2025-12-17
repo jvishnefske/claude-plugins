@@ -1,68 +1,103 @@
 ---
-description: Request to skip a layer with justification (requires proof of inapplicability)
+description: Skip a layer with justification (requires proof of inapplicability)
 arguments:
-  - name: layer
-    description: Layer to skip (e.g., formal-verification)
-    required: true
-  - name: reason
+  - name: justification
     description: Justification for skipping
     required: true
 ---
 
-You are processing a request to skip layer **{{layer}}** in the Swiss Cheese verification.
+You are processing a request to skip a layer in the Swiss Cheese verification.
 
-## Skip Request
+**Justification provided**: {{justification}}
 
-**Layer**: {{layer}}
-**Justification**: {{reason}}
+## Skippable Layers
 
-## Validation Rules
+Only certain layers can be skipped:
 
-Layers can only be skipped with valid justification:
+### Layer 6: Formal Verification (Optional)
 
-### Formal Verification (Layer 6)
 **Can skip if**:
-- No `unsafe` blocks in codebase
-- No safety-critical invariants
-- Project is not safety-critical (e.g., internal tooling)
-- Tools not available for target platform
+- No `unsafe` blocks in codebase: `grep -r "unsafe" src/ | wc -l` = 0
+- No critical invariants documented
+- Kani/Prusti not available for target platform
 
 **Cannot skip if**:
 - Contains `unsafe` code
-- Handles user input directly
+- Critical requirements exist
 - Security-critical functionality
 
-### Dynamic Analysis (Layer 7)
-**Can skip if**:
-- Pure library with no I/O
-- Comprehensive unit test coverage (>95%)
-- No async or concurrent code
+### All Other Layers
 
-**Cannot skip if**:
-- Network or file I/O
-- Concurrent/parallel code
-- User-facing application
-
-### Other Layers
-Layers 1-5 and 8-9 generally **cannot be skipped** as they form the core verification chain.
+Layers 1-5 and 7-9 **cannot be skipped** - they form the core verification chain.
 
 ## Decision Process
 
-1. Verify the layer is one that can potentially be skipped
-2. Evaluate the justification against the criteria above
-3. Check the codebase to validate claims (e.g., search for `unsafe`)
+1. Identify which layer the user wants to skip
+2. Verify it's a skippable layer (only formal_verification is optional by default)
+3. Validate the justification:
+
+```bash
+# Check for unsafe code
+grep -r "unsafe" src/ --include="*.rs" | wc -l
+
+# Check requirements for criticality flags
+grep -i "safety\|critical" design.toml
+```
+
 4. Make a decision:
 
-**If APPROVED**:
-- Add layer to `skipped_gates` in state file
-- Document the justification
-- Proceed to next layer
+### If APPROVED
 
-**If DENIED**:
-- Explain why the skip cannot be approved
-- Provide guidance on what's needed to pass the gate
-- Suggest alternatives if applicable
+The Makefile target for optional layers should handle this:
+```bash
+# In validate-formal-verification:
+# If kani not available, exit 0 (pass)
+```
 
-## Evaluate Now
+Report:
+```
+Layer Skip Approved
+===================
 
-Analyze the codebase and the provided justification to make a decision on this skip request.
+Layer: formal_verification
+Justification: {{justification}}
+
+Validation:
+- No unsafe code found: ✓
+- Not critical: ✓
+
+Proceeding to next layer (dynamic_analysis).
+```
+
+### If DENIED
+
+```
+Layer Skip Denied
+=================
+
+Layer: <layer_name>
+Reason: <why it cannot be skipped>
+
+Required actions:
+- <what needs to be done to pass the gate>
+```
+
+## Common Justifications
+
+**Valid**:
+- "No unsafe code in project" (verify with grep)
+- "Kani not available on this platform"
+- "Pure library with no safety requirements"
+
+**Invalid**:
+- "Takes too long" (not a valid reason)
+- "Not needed" (requires proof)
+- "Will do later" (defeats the purpose)
+
+## Instructions
+
+1. Determine which layer is being skipped based on context
+2. Verify the justification with codebase analysis
+3. Approve or deny with clear reasoning
+4. If approved, proceed to next layer
+5. If denied, explain what's needed

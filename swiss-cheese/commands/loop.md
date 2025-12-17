@@ -2,98 +2,69 @@
 description: Start iterative refinement loop until all gates pass
 ---
 
-You are starting the Swiss Cheese orchestrated execution loop. This uses **concurrent task execution** with topological sorting to maximize parallelism while respecting dependencies.
+You are continuing the Swiss Cheese orchestrated execution loop.
 
-## Orchestrated Loop Algorithm
+## How the Loop Works
 
-```
-while not all_tasks_passed:
-    # Get all tasks with satisfied dependencies (can run in parallel)
-    ready_tasks = topological_sort(pending_tasks)
+The orchestrator runs automatically on **Stop events**:
 
-    # Dispatch up to max_parallel_agents concurrently
-    for task in ready_tasks[:max_parallel]:
-        worktree = create_worktree(task.branch)
-        spawn_subagent(task, worktree)
+1. When you try to stop, the orchestrator intercepts
+2. It checks the current layer's gate status
+3. Runs `make validate-<layer>` to verify
+4. If gate fails → blocks and prompts you to fix issues
+5. If gate passes → advances to next layer
+6. Loop continues until all 9 layers pass
 
-    # Wait for batch completion
-    await all_subagents_complete()
+## Your Role
 
-    # Validate each task
-    for task in current_batch:
-        if validators_pass(task):
-            task.status = PASSED
-            completed_branches.append(task.branch)
-        else:
-            task.iteration += 1
-            if task.iteration < max_iterations:
-                task.status = PENDING  # Retry
-            else:
-                task.status = FAILED
-```
+Simply work on the current layer's tasks. The orchestrator will:
+- Tell you which layer you're on
+- Show any gate failures that need fixing
+- Advance you automatically when gates pass
 
-## Execution Rules
-
-1. **Parallel Execution**: Tasks without interdependencies run concurrently in separate worktrees
-2. **Topological Order**: Dependencies are respected via graph sorting
-3. **Auto-Retry**: Failed tasks retry automatically (up to max_iterations)
-4. **Validation Gates**: Validators run after each task completion
-5. **Branch Isolation**: Each task works in its own git branch
-6. **Linear Rebase**: Completed branches are rebased in dependency order
-
-## Task Dependencies (Example)
+## Layer Progression
 
 ```
-parse_requirements ──→ formalize_constraints ──→ design_modules ──→ define_interfaces
-                                                                           │
-                                    ┌──────────────────────────────────────┼──────────────────┐
-                                    ↓                                      ↓                  ↓
-                            write_unit_tests                    write_property_tests   write_integration_tests
-                                    │                                      │                  │
-                                    └──────────────────┬───────────────────┘                  │
-                                                       ↓                                      │
-                                               implement_core ←───────────────────────────────┘
-                                                       │
-                    ┌──────────────────────────────────┼──────────────────────────────────────┐
-                    ↓                                  ↓                                      ↓
-               run_clippy                          run_miri                            run_kani
-               run_audit                       measure_coverage
-               run_deny                         run_fuzzing
-                    │                                  │                                      │
-                    └──────────────────────────────────┼──────────────────────────────────────┘
-                                                       ↓
-                                              independent_review
-                                                       ↓
-                                             assemble_safety_case
+requirements → architecture → tdd → implementation →
+static_analysis → formal_verification → dynamic_analysis →
+review → safety
 ```
 
-## Starting the Loop
+Each layer must pass its Makefile gate before advancing.
 
-1. Check orchestrator status:
-   ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py status
-   ```
+## Gate Validation
 
-2. The orchestrator dispatches ready tasks automatically via hooks
+Gates are Makefile targets that return 0 for pass, non-zero for fail:
 
-3. For manual dispatch, signal readiness and the `UserPromptSubmit` hook will dispatch
+| Layer | Target | What it checks |
+|-------|--------|----------------|
+| requirements | `validate-requirements` | design.toml valid, all reqs have criteria |
+| architecture | `validate-architecture` | Docs exist, Cargo.toml valid |
+| tdd | `validate-tdd` | Tests compile |
+| implementation | `validate-implementation` | Tests pass |
+| static_analysis | `validate-static-analysis` | Clippy, audit, deny pass |
+| formal_verification | `validate-formal-verification` | Kani passes (optional) |
+| dynamic_analysis | `validate-dynamic-analysis` | Miri, coverage pass |
+| review | `validate-review` | Review docs exist |
+| safety | `validate-safety-case` | All evidence assembled |
 
-4. Monitor progress with `/swiss-cheese:status`
+## Instructions
 
-5. Cancel with `/swiss-cheese:cancel`
-
-## Progress Tracking
-
-The orchestrator tracks:
-- Task status (pending, running, validating, passed, failed)
-- Current batch of concurrent tasks
-- Validation errors for retries
-- Completed branches ready for rebase
+1. Read the design document to understand current tasks
+2. Work on tasks for the current layer
+3. When ready, the orchestrator will validate the gate
+4. Fix any failures reported
+5. Continue until all gates pass
 
 ## Completion
 
-When all tasks pass:
-1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py rebase` to merge branches
-2. Or manually rebase: branches are in `.worktrees/` directory
+When all gates pass:
+- Traceability matrix saved to `.claude/traceability_matrix.json`
+- Session completes successfully
+- Ready for release decision
 
-Begin the orchestrated loop now. The hooks will automatically dispatch tasks as you work.
+## Cancellation
+
+To cancel the loop and stop immediately:
+- Use `/swiss-cheese:cancel`
+- Or remove/rename the design.toml file

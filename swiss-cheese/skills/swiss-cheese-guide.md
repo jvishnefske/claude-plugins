@@ -1,200 +1,166 @@
 ---
-description: Use this skill when the user asks about "Swiss Cheese Model", "safety-critical Rust", "verification layers", "how to use swiss-cheese plugin", "rust verification workflow", "9-layer verification", "concurrent task orchestration", "topological sorting", "worktree orchestrator", or needs guidance on using the Swiss Cheese verification plugin for Rust development.
+description: Use this skill when the user asks about "Swiss Cheese Model", "verified Rust", "verification layers", "how to use swiss-cheese plugin", "rust verification workflow", "9-layer verification", "Makefile gates", or needs guidance on using the Swiss Cheese verification plugin.
 ---
 
-# Swiss Cheese Model - Safety-Critical Rust Development Guide
+# Swiss Cheese Model - Verified Development Guide
 
-The Swiss Cheese Model plugin implements a 9-layer verification approach for safety-critical Rust development, inspired by NASA's Swiss Cheese Model for accident prevention. It features **concurrent task orchestration** using topological sorting and git worktrees for parallel execution.
+The Swiss Cheese Model plugin implements a 9-layer verification approach for verified development, inspired by NASA's Swiss Cheese Model for accident prevention.
 
 ## Core Concept
 
 Like layers of Swiss cheese, each verification layer catches defects that slip through previous layers. No single layer is perfect, but together they provide defense in depth.
 
-## Concurrent Task Orchestration
+## Architecture
 
-The orchestrator maximizes parallelism while respecting task dependencies:
-
-1. **Topological Sorting**: Uses Python's `graphlib.TopologicalSorter` to identify tasks that can run concurrently
-2. **Git Worktrees**: Each task executes in its own branch worktree for isolation
-3. **Auto-Retry**: Failed tasks are automatically retried (configurable `max_iterations`)
-4. **Validators**: Layer-specific validators run after each task to verify success
-5. **Linear Rebase**: Completed branches are rebased in dependency order
+The orchestrator runs on **Stop events only** and:
+1. Validates the TOML design document against a schema
+2. Tracks task/gate status in `/tmp` (invisible to agent)
+3. Runs **Makefile targets** for gate validation
+4. Generates **traceability matrix** from test results
+5. Blocks and continues until all gates pass
 
 ## The 9 Verification Layers
 
-### Layer 1: Requirements (`/swiss-cheese:gate requirements`)
-- Formalize requirements with Rust-specific constraints
-- Identify ownership, lifetime, and concurrency requirements
-- Define testable acceptance criteria
-- Agent: `requirements-agent`
+| Layer | Name | Makefile Target | Purpose |
+|-------|------|-----------------|---------|
+| 1 | Requirements | `validate-requirements` | Formalize testable requirements |
+| 2 | Architecture | `validate-architecture` | Design type-safe architecture |
+| 3 | TDD | `validate-tdd` | Write tests BEFORE implementation |
+| 4 | Implementation | `validate-implementation` | Code to pass tests |
+| 5 | Static Analysis | `validate-static-analysis` | Clippy, audit, deny |
+| 6 | Formal Verification | `validate-formal-verification` | Kani proofs (optional) |
+| 7 | Dynamic Analysis | `validate-dynamic-analysis` | Miri, coverage |
+| 8 | Review | `validate-review` | Independent code review |
+| 9 | Safety Case | `validate-safety-case` | Assemble evidence |
 
-### Layer 2: Architecture (`/swiss-cheese:gate architecture`)
-- Design type-safe, ownership-correct architecture
-- Define module structure and trait contracts
-- Plan error handling strategy
-- Agent: `architecture-agent`
+## Quick Start
 
-### Layer 3: TDD (`/swiss-cheese:gate tdd`)
-- Write comprehensive tests BEFORE implementation
-- Unit tests, integration tests, property-based tests
-- Tests should compile but fail (red phase)
-- Agent: `tdd-agent`
+1. Create `design.toml` with requirements and tasks
+2. Create `Makefile` with gate validation targets
+3. Run `/swiss-cheese` to start
+4. Work on tasks - orchestrator guides you through layers
+5. Gates validate automatically on Stop events
 
-### Layer 4: Implementation (`/swiss-cheese:gate implementation`)
-- Implement safe Rust code to pass tests
-- Minimize `unsafe` blocks
-- Follow Rust idioms and API guidelines
-- Agent: `implementation-agent`
-
-### Layer 5: Static Analysis (`/swiss-cheese:gate static-analysis`)
-- Run `cargo clippy -- -D warnings`
-- Run `cargo audit` for vulnerabilities
-- Run `cargo deny check` for licenses
-- Audit all `unsafe` blocks
-- Agent: `static-analysis-agent`
-
-### Layer 6: Formal Verification (`/swiss-cheese:gate formal-verification`)
-- Prove properties with Kani, Prusti, Creusot
-- Model checking for critical functions
-- Can be skipped if no unsafe code (use `/swiss-cheese:skip-layer`)
-- Agent: `formal-verification-agent`
-
-### Layer 7: Dynamic Analysis (`/swiss-cheese:gate dynamic-analysis`)
-- Run Miri for undefined behavior detection
-- Fuzzing with cargo-fuzz
-- Coverage analysis (target >80%)
-- Agent: `dynamic-analysis-agent`
-
-### Layer 8: Review (`/swiss-cheese:gate review`)
-- Independent fresh-eyes code review
-- Security, correctness, reliability, maintainability
-- Agent: `review-agent` (uses Opus model)
-
-### Layer 9: Safety Case (`/swiss-cheese:gate safety-case`)
-- Assemble all verification evidence
-- Requirements traceability
-- Make GO/NO-GO release decision
-- Agent: `safety-agent` (uses Opus model)
-
-## Quick Start Commands
-
-```
-/swiss-cheese              # Start a new verification session
-/swiss-cheese:status       # Show current verification status
-/swiss-cheese:gate <name>  # Run a specific gate
-/swiss-cheese:loop         # Iterate until all gates pass
-/swiss-cheese:skip-layer   # Skip a layer with justification
-/swiss-cheese:cancel       # Cancel the current loop
-```
-
-## State Management
-
-### Orchestrator State (`.claude/orchestrator_state.json`)
-
-The orchestrator maintains detailed task state:
-```json
-{
-  "tasks": {
-    "implement_core": {
-      "status": "running",
-      "layer": "implementation",
-      "iteration": 0,
-      "branch": "swiss-cheese/implement_core",
-      "worktree_path": ".worktrees/swiss-cheese-implement_core",
-      "validation_errors": []
-    }
-  },
-  "current_batch": ["implement_core", "run_clippy"],
-  "completed_branches": ["swiss-cheese/write_tests"],
-  "max_iterations": 5,
-  "max_parallel": 4
-}
-```
-
-### Legacy State (`/tmp/swiss_cheese_state.json`)
-
-For backward compatibility with layer-based commands:
-```json
-{
-  "layer": "current-layer",
-  "files": ["modified/files.rs"],
-  "gates_passed": ["requirements", "architecture"],
-  "ci_runs": [{"command": "cargo test", "layer": "tdd"}],
-  "project_dir": "/path/to/project"
-}
-```
-
-## Hooks
-
-The plugin includes hooks that:
-- **SessionStart**: Initialize orchestrator from design document
-- **UserPromptSubmit**: Dispatch ready tasks via topological sort
-- **SubagentStop**: Validate completed tasks, retry failures
-- **Pre-edit**: Warn about unsafe patterns, enforce layer constraints
-- **Post-edit**: Track modified files, invalidate dependent gates
-- **Pre-bash**: Track verification commands
-- **Stop**: Check for incomplete tasks, suggest next steps
-
-## Example Architecture Document (TOML)
-
-See `examples/example_project.toml` for a complete design document. Key sections:
+## Design Document Format (TOML)
 
 ```toml
 [project]
 name = "my-project"
-max_iterations = 5       # Auto-retry failed tasks
-max_parallel_agents = 4  # Concurrent worktrees
+version = "0.1.0"
+max_iterations = 5
 
-[layers.implementation]
-description = "Implement safe Rust code"
-depends_on = ["tdd"]
-validators = ["cargo_test", "cargo_build"]
+[[requirements]]
+id = "REQ-001"
+title = "Safe Input Parsing"
+description = "System must safely parse untrusted input"
+priority = "critical"
+acceptance_criteria = [
+    "No panics on malformed input",
+    "All errors are recoverable",
+]
 
-[tasks.implement_core]
+[tasks.implement_parser]
 layer = "implementation"
-description = "Implement core functionality"
-depends_on = ["write_tests"]
-agent = "implementation-agent"
-# branch auto-generated: swiss-cheese/implement_core
+description = "Implement safe parser"
+depends_on = ["write_parser_tests"]
+requirements = ["REQ-001"]
 
-[validators]
-cargo_test = "cargo test"
-cargo_build = "cargo build"
-
-[worktree]
-branch_prefix = "swiss-cheese"
-cleanup_on_success = true
+[gates.implementation]
+target = "validate-implementation"
 ```
 
-## Orchestrator CLI
+## Makefile Requirements
 
-```bash
-# Initialize from design document
-python3 orchestrator.py init design.toml
+```makefile
+validate-requirements:
+	@test -f design.toml
+	@python3 -c "import tomllib; tomllib.load(open('design.toml', 'rb'))"
 
-# Check current status
-python3 orchestrator.py status
+validate-implementation:
+	cargo build --all-targets
+	cargo test --all-features
 
-# Dispatch ready tasks (called by hooks)
-python3 orchestrator.py dispatch
+validate-static-analysis:
+	cargo clippy --all-targets -- -D warnings
+	cargo audit || true
+```
 
-# Handle subagent completion (called by hooks)
-python3 orchestrator.py on_subagent_complete
+## Commands
 
-# Rebase completed branches
-python3 orchestrator.py rebase
+| Command | Purpose |
+|---------|---------|
+| `/swiss-cheese` | Start verification session |
+| `/swiss-cheese:status` | Show current status |
+| `/swiss-cheese:gate <name>` | Run specific gate |
+| `/swiss-cheese:loop` | Continue orchestration |
+| `/swiss-cheese:skip-layer <reason>` | Skip optional layer |
+| `/swiss-cheese:cancel` | Cancel orchestration |
 
-# Reset state
-python3 orchestrator.py reset
+## Traceability
+
+Name tests to match requirements for automatic linking:
+- `REQ-001` → `test_req_001_*`
+
+The orchestrator generates `.claude/traceability_matrix.json`:
+
+```json
+{
+  "requirements": [
+    {"id": "REQ-001", "tests": ["test_req_001_valid"], "covered": true}
+  ],
+  "coverage": {"REQ-001": "verified"}
+}
+```
+
+## How Orchestration Works
+
+```
+User works on tasks
+        ↓
+User tries to stop
+        ↓
+orchestrate.py runs (Stop hook)
+        ↓
+Validates design.toml against schema
+        ↓
+Checks current layer status
+        ↓
+Runs: make validate-<layer>
+        ↓
+    ┌───────────────────┐
+    │ Gate passed?      │
+    └───────────────────┘
+      │ Yes         │ No
+      ↓             ↓
+   Advance       Block and
+   to next       prompt to
+   layer         fix issues
+      │             │
+      └─────────────┘
+              ↓
+        Continue loop
+              ↓
+    All layers passed?
+      │ Yes         │ No
+      ↓             ↓
+   Complete      Continue
+   (approve)     working
 ```
 
 ## Best Practices
 
 1. **Don't skip layers** unless absolutely necessary
 2. **Document skip decisions** with clear justification
-3. **Re-run affected gates** when code changes
-4. **Use the loop command** for orchestrated execution
-5. **Review all warnings** from hooks before proceeding
-6. **Design task dependencies** to maximize parallelism
-7. **Use validators** to automatically verify task completion
-8. **Check orchestrator status** to monitor concurrent tasks
+3. **Name tests** to match requirement IDs for traceability
+4. **Use the schema** - design.toml is validated automatically
+5. **Check gate output** when failures occur
+6. **Create comprehensive Makefile** with all gate targets
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `design.toml` | Requirements, tasks, gates |
+| `Makefile` | Gate validation targets |
+| `/tmp/swiss_cheese_*.json` | Orchestrator status (internal) |
+| `.claude/traceability_matrix.json` | Final traceability report |

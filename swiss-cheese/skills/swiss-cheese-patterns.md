@@ -1,6 +1,10 @@
+---
+description: Use this skill when the user needs guidance on safe Rust patterns, newtype wrappers, type-state machines, error handling, no-panic code, Kani harnesses, or Clippy configuration for production-grade development.
+---
+
 # Safe Rust Patterns Skill
 
-This skill provides patterns for writing safety-critical Rust code that passes all verification layers.
+This skill provides patterns for writing production-grade Rust code that passes all verification layers.
 
 ## Core Principles
 
@@ -22,20 +26,20 @@ pub struct Rpm(u16);
 impl Rpm {
     pub const ZERO: Self = Self(0);
     pub const MAX: Self = Self(5000);
-    
+
     /// Fallible construction
     pub const fn new(value: u16) -> Option<Self> {
         if value <= 5000 { Some(Self(value)) } else { None }
     }
-    
+
     /// Infallible construction (saturates)
     pub const fn saturating_new(value: u16) -> Self {
         if value <= 5000 { Self(value) } else { Self::MAX }
     }
-    
+
     /// Safe accessor
     pub const fn get(self) -> u16 { self.0 }
-    
+
     /// Checked arithmetic
     pub const fn checked_add(self, rhs: Self) -> Option<Self> {
         match self.0.checked_add(rhs.0) {
@@ -74,7 +78,7 @@ impl Motor<Running> {
     pub fn stop(self) -> Motor<Idle> {
         Motor { pwm: self.pwm, _state: PhantomData }
     }
-    
+
     pub fn fault(self) -> Motor<Fault> {
         Motor { pwm: self.pwm, _state: PhantomData }
     }
@@ -96,7 +100,7 @@ pub enum MotorError {
 }
 
 impl MotorError {
-    pub const fn is_safety_critical(&self) -> bool {
+    pub const fn is_critical(&self) -> bool {
         matches!(self, Self::HardwareFault(_))
     }
 }
@@ -170,7 +174,7 @@ fn safe_parse(s: &str) -> Result<u32, ParseError> {
 
 ```rust
 /// SAFETY: Document all invariants
-/// 
+///
 /// # Safety
 /// - `addr` must be valid peripheral base address
 /// - Must be called only once per peripheral
@@ -196,21 +200,21 @@ pub fn get_peripheral() -> Peripheral {
 #[cfg(kani)]
 mod verification {
     use super::*;
-    
+
     #[kani::proof]
     fn verify_rpm_bounded() {
         let v: u16 = kani::any();
         let rpm = Rpm::saturating_new(v);
         assert!(rpm.get() <= 5000);
     }
-    
+
     #[kani::proof]
     #[kani::unwind(5)]
     fn verify_no_overflow() {
         let a: u16 = kani::any();
         let b: u16 = kani::any();
         kani::assume(a <= 5000 && b <= 5000);
-        
+
         if let Some(rpm_a) = Rpm::new(a) {
             if let Some(rpm_b) = Rpm::new(b) {
                 // This should never panic
@@ -254,7 +258,7 @@ pedantic = { level = "warn", priority = -1 }
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    
+
     proptest! {
         #[test]
         fn rpm_always_valid(v in 0u16..=10000) {

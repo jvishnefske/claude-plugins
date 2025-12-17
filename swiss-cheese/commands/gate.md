@@ -1,198 +1,142 @@
 ---
-description: Run a specific gate validation (exit 0=pass, exit 1=fail)
+description: "Gate to run: requirements, architecture, tdd, implementation, static-analysis, formal-verification, dynamic-analysis, review, safety-case"
 arguments:
   - name: gate_name
     description: "Gate to run: requirements, architecture, tdd, implementation, static-analysis, formal-verification, dynamic-analysis, review, safety-case"
     required: true
 ---
 
-You are running the **{{gate_name}}** verification gate for the Swiss Cheese Model.
+You are manually running the **{{gate_name}}** verification gate.
 
-## Gate Definitions
+## Running the Gate
+
+Execute the Makefile target for this gate:
+
+```bash
+make validate-{{gate_name}}
+```
+
+## Gate Details
 
 {{#if (eq gate_name "requirements")}}
 ### Layer 1: Requirements Validation
 
-**Objective**: Ensure requirements are complete, unambiguous, and testable.
+**Makefile Target**: `validate-requirements`
 
-**Checks**:
-1. Each requirement has a unique identifier (REQ-XXX)
-2. Requirements are testable (have clear acceptance criteria)
-3. Rust-specific constraints are identified:
-   - Memory safety requirements
-   - Concurrency requirements
-   - Error handling strategy
-   - Performance constraints
-4. Dependencies between requirements are documented
-5. Safety-critical requirements are marked
+**What it checks**:
+- `design.toml` exists and is valid TOML
+- All requirements have `acceptance_criteria`
+- Requirement IDs follow REQ-NNN pattern
 
-**Pass Criteria**: All requirements validated, no ambiguities remain.
+**To pass manually**:
+1. Ensure `design.toml` exists with valid [[requirements]] section
+2. Each requirement needs: id, title, description, acceptance_criteria
 
 {{else if (eq gate_name "architecture")}}
 ### Layer 2: Architecture Design
 
-**Objective**: Design type-safe, ownership-correct architecture.
+**Makefile Target**: `validate-architecture`
 
-**Checks**:
-1. Module structure follows Rust idioms
-2. Ownership model is clear (who owns what data)
-3. Lifetimes are explicit where needed
-4. Error types are defined
-5. Public API surface is minimal
-6. Traits define behavior contracts
-7. No unnecessary `Arc<Mutex<>>` (design away shared state)
+**What it checks**:
+- Architecture documentation exists (docs/architecture.md or ARCHITECTURE.md)
+- Cargo.toml is valid (if Rust project)
 
-**Pass Criteria**: Architecture document complete, ownership model verified.
+**To pass manually**:
+1. Create architecture documentation
+2. Ensure Cargo.toml structure is valid
 
 {{else if (eq gate_name "tdd")}}
 ### Layer 3: Test-Driven Development
 
-**Objective**: Write comprehensive tests BEFORE implementation.
+**Makefile Target**: `validate-tdd`
 
-**Checks**:
-1. Unit tests exist for all public functions
-2. Integration tests cover module interactions
-3. Property-based tests for invariants
-4. Edge cases are covered
-5. Error paths are tested
-6. Tests are deterministic and fast
+**What it checks**:
+- Test files exist
+- Tests compile (`cargo test --no-run`)
 
-**Commands to run**:
-```bash
-cargo test --no-run  # Verify tests compile
-```
-
-**Pass Criteria**: All tests written and compiling (failing is expected - TDD red phase).
+**To pass manually**:
+1. Write tests for all requirements
+2. Tests should compile but may fail (TDD red phase)
 
 {{else if (eq gate_name "implementation")}}
 ### Layer 4: Implementation
 
-**Objective**: Implement safe Rust code that passes all tests.
+**Makefile Target**: `validate-implementation`
 
-**Checks**:
-1. All tests pass: `cargo test`
-2. No compiler warnings: `cargo build 2>&1 | grep -c warning` = 0
-3. Code follows Rust idioms
-4. `unsafe` blocks are minimized and documented
-5. Error handling uses `Result<T, E>` properly
+**What it checks**:
+- `cargo build --all-targets` succeeds
+- `cargo test --all-features` passes
 
-**Commands to run**:
-```bash
-cargo test
-cargo build --release
-```
-
-**Pass Criteria**: All tests pass, no warnings, clean build.
+**To pass manually**:
+1. Implement code to pass all tests
+2. No build errors or warnings
 
 {{else if (eq gate_name "static-analysis")}}
 ### Layer 5: Static Analysis
 
-**Objective**: Catch issues through static analysis tools.
+**Makefile Target**: `validate-static-analysis`
 
-**Tools to run**:
-```bash
-cargo clippy -- -D warnings
-cargo audit
-cargo deny check
-cargo +nightly udeps  # Find unused dependencies
-```
+**What it checks**:
+- `cargo clippy -- -D warnings` passes
+- `cargo audit` (if installed) - no critical vulnerabilities
+- `cargo deny check` (if configured) - license compliance
 
-**Checks**:
-1. Clippy passes with no warnings
-2. No known vulnerabilities (cargo audit)
-3. License compliance (cargo deny)
-4. All `unsafe` blocks are audited and documented
-
-**Pass Criteria**: All static analysis tools pass.
+**To pass manually**:
+1. Fix all Clippy warnings
+2. Address any security advisories
+3. Ensure license compliance
 
 {{else if (eq gate_name "formal-verification")}}
-### Layer 6: Formal Verification
+### Layer 6: Formal Verification (Optional)
 
-**Objective**: Prove safety properties mathematically.
+**Makefile Target**: `validate-formal-verification`
 
-**Tools**:
-```bash
-cargo kani          # Model checking
-cargo prusti        # Verification conditions
-cargo creusot       # Deductive verification
-```
+**What it checks**:
+- `cargo kani` passes (if Kani installed)
 
-**Checks**:
-1. Critical functions have proof annotations
-2. Invariants are specified and proven
-3. No undefined behavior possible
-4. Memory safety proven for unsafe blocks
-
-**Note**: This layer may be skipped with `/swiss-cheese:skip-layer formal-verification` if:
-- No unsafe code exists
-- No safety-critical invariants
-- Project is not safety-critical
-
-**Pass Criteria**: Proofs complete or layer justifiably skipped.
+**This layer is optional**. Skip with justification if:
+- No unsafe code
+- No critical invariants
+- Kani not available
 
 {{else if (eq gate_name "dynamic-analysis")}}
 ### Layer 7: Dynamic Analysis
 
-**Objective**: Find runtime issues through dynamic analysis.
+**Makefile Target**: `validate-dynamic-analysis`
 
-**Tools to run**:
-```bash
-cargo +nightly miri test           # Undefined behavior detection
-cargo fuzz run <target>            # Fuzzing
-cargo tarpaulin --out Html         # Code coverage
-```
+**What it checks**:
+- `cargo +nightly miri test` (if available)
+- `cargo llvm-cov` coverage >= threshold
 
-**Checks**:
-1. Miri finds no undefined behavior
-2. Fuzzing runs without crashes (minimum 1 hour)
-3. Code coverage > 80%
-4. No memory leaks detected
-
-**Pass Criteria**: All dynamic analysis passes, coverage targets met.
+**To pass manually**:
+1. Run Miri to check for undefined behavior
+2. Achieve coverage target (typically 70-80%)
 
 {{else if (eq gate_name "review")}}
 ### Layer 8: Code Review
 
-**Objective**: Fresh-eyes independent review.
+**Makefile Target**: `validate-review`
 
-**Review Checklist**:
-1. Code is readable and well-documented
-2. Error messages are helpful
-3. Public API is intuitive
-4. No obvious logic errors
-5. Security considerations addressed
-6. Performance is acceptable
-7. Edge cases handled
+**What it checks**:
+- Review documentation exists (REVIEW.md or .claude/review.md)
 
-**Process**:
-- Review each modified file
-- Check diff against requirements
-- Verify test coverage
-- Document any concerns
-
-**Pass Criteria**: Review complete, all concerns addressed.
+**To pass manually**:
+1. Conduct code review
+2. Document findings and resolutions
 
 {{else if (eq gate_name "safety-case")}}
 ### Layer 9: Safety Case
 
-**Objective**: Assemble evidence and make release decision.
+**Makefile Target**: `validate-safety-case`
 
-**Safety Case Contents**:
-1. Requirements traceability matrix
-2. Test coverage report
-3. Static analysis results
-4. Formal verification proofs (if applicable)
-5. Dynamic analysis results
-6. Review sign-off
-7. Known limitations and mitigations
-8. Release recommendation
-
-**Decision Criteria**:
+**What it checks**:
 - All previous gates passed
-- No unmitigated risks
-- Documentation complete
+- Traceability report generated
 
-**Pass Criteria**: Safety case assembled, release decision made.
+**To pass manually**:
+1. Verify all evidence assembled
+2. Make release decision
+3. Traceability matrix complete
 
 {{else}}
 ### Unknown Gate: {{gate_name}}
@@ -208,17 +152,16 @@ Valid gates are:
 - review
 - safety-case
 
-Please run with a valid gate name.
 {{/if}}
 
-## Execution
+## Instructions
 
-1. Run the gate checks as specified above
-2. Document results
-3. Update `/tmp/swiss_cheese_state.json`:
-   - If PASS: Add "{{gate_name}}" to `gates_passed` array
-   - If FAIL: Document what needs to be fixed
+1. Run `make validate-{{gate_name}}`
+2. If it fails, review the output and fix issues
+3. Re-run until the gate passes
+4. The orchestrator will automatically advance when the gate passes
 
-4. Report result:
-   - PASS: Proceed to next gate
-   - FAIL: Fix issues and re-run gate
+## Exit Codes
+
+- **0**: Gate passed
+- **Non-zero**: Gate failed (see output for details)

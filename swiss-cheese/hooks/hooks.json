@@ -1,58 +1,13 @@
 {
-  "description": "Swiss Cheese lifecycle hooks for safety-critical Rust development. Enforces verification at every stage with concurrent task orchestration.",
+  "description": "Swiss Cheese orchestration - Stop and SubagentStop hooks for Makefile-based gating",
   "hooks": {
-    "SessionStart": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_init.py",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py dispatch",
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_edit.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_bash.py",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/post_edit.py",
-            "timeout": 30
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrate.py",
+            "timeout": 120
           }
         ]
       }
@@ -62,38 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrator.py on_subagent_complete",
-            "timeout": 60
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop.py",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Check if Swiss Cheese orchestration is active. If tasks remain with status PENDING or FAILED under max_iterations, output {\"decision\": \"block\", \"reason\": \"Tasks incomplete, continue orchestration\"}. Otherwise approve."
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/notification.py",
-            "timeout": 5
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/orchestrate.py",
+            "timeout": 120
           }
         ]
       }
