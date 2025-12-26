@@ -280,7 +280,7 @@ def main() -> None:
         )
 
     # Get worktree info
-    worktrees = list_worktrees(project_dir)
+    _worktrees = list_worktrees(project_dir)
 
     # Build task contexts
     task_contexts = []
