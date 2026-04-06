@@ -15,8 +15,8 @@ This command runs all verification layer gates and generates a validation report
    - `validate-verify` (Layer 4)
 
 2. **Collects metrics** (if available):
-   - Code coverage from `.claude/coverage.json`
-   - Test results from `.claude/test-results.json`
+   - Code coverage from `docs/plans/coverage.json`
+   - Test results from `docs/plans/test-results.json`
    - Requirements traceability from `design.toml`
 
 3. **Embeds git hash** for staleness detection

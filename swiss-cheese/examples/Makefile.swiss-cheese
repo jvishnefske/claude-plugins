@@ -15,7 +15,7 @@
 # Configuration
 COVERAGE_THRESHOLD ?= 70
 PROPTEST_CASES ?= 10000
-REPORT_DIR ?= .claude
+REPORT_DIR ?= docs/plans
 FUZZ_DURATION ?= 60
 
 all: verify
@@ -163,7 +163,7 @@ bench:
 # =============================================================================
 validate-review:
 	@echo "=== Layer 8: Review ==="
-	@test -f REVIEW.md -o -f .claude/review.md || echo "No review docs"
+	@test -f REVIEW.md -o -f docs/plans/review.md || echo "No review docs"
 	@echo "✓ Review checked"
 
 validate-safety-case: traceability-report

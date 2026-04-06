@@ -201,7 +201,7 @@ def run_layer_gates(project_dir: Path) -> dict[str, LayerResult]:
 def collect_coverage(project_dir: Path) -> Optional[CoverageMetrics]:
     """Collect coverage metrics from coverage.json or cargo llvm-cov."""
     # Try reading existing coverage.json
-    coverage_file = project_dir / ".claude" / "coverage.json"
+    coverage_file = project_dir / "docs" / "plans" / "coverage.json"
     if coverage_file.exists():
         try:
             data = json.loads(coverage_file.read_text())
@@ -232,7 +232,7 @@ def collect_coverage(project_dir: Path) -> Optional[CoverageMetrics]:
 
 def collect_test_results(project_dir: Path) -> Optional[TestRunMetrics]:
     """Collect test results from test-results.json or cargo test --format=json."""
-    test_file = project_dir / ".claude" / "test-results.json"
+    test_file = project_dir / "docs" / "plans" / "test-results.json"
     if test_file.exists():
         try:
             lines = test_file.read_text().strip().split('\n')
