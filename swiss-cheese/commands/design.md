@@ -10,7 +10,7 @@ You are conducting requirements analysis to produce a task specification.
 
 ## Goal
 
-Produce `.claude/tasks.toml` - a validated task list ready for implementation.
+Produce `docs/plans/tasks.toml` - a validated task list ready for implementation.
 
 ## Process
 
@@ -22,7 +22,7 @@ Produce `.claude/tasks.toml` - a validated task list ready for implementation.
 2. Extract functional requirements with testable acceptance criteria
 3. Break into implementable tasks with dependencies
 4. Validate the task graph (no cycles, all deps exist)
-5. Write `.claude/tasks.toml`
+5. Write `docs/plans/tasks.toml`
 
 ## Task Specification Schema (TOML)
 
@@ -73,7 +73,7 @@ Before setting `status = "ready_for_implementation"`:
 
 ## Output
 
-Create `.claude/tasks.toml` with:
+Create `docs/plans/tasks.toml` with:
 1. All requirements broken into tasks
 2. Dependencies correctly mapped
 3. Testable acceptance criteria

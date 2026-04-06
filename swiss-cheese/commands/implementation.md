@@ -2,7 +2,7 @@
 description: Begin TDD implementation from task specification
 ---
 
-You are starting Test-Driven Development for tasks defined in `.claude/tasks.yaml`.
+You are starting Test-Driven Development for tasks defined in `docs/plans/tasks.yaml`.
 
 ## TDD Workflow
 

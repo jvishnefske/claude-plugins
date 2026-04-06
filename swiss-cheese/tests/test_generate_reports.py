@@ -239,8 +239,8 @@ class TestCollectCoverage:
     def test_cargo_llvm_cov_format(self):
         """Parses cargo-llvm-cov JSON format."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            claude_dir = Path(tmpdir) / ".claude"
-            claude_dir.mkdir()
+            claude_dir = Path(tmpdir) / "docs" / "plans"
+            claude_dir.mkdir(parents=True)
             coverage_file = claude_dir / "coverage.json"
             coverage_file.write_text(json.dumps({
                 "data": [{
@@ -270,8 +270,8 @@ class TestCollectTestResults:
     def test_cargo_test_json_format(self):
         """Parses cargo test --format=json output."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            claude_dir = Path(tmpdir) / ".claude"
-            claude_dir.mkdir()
+            claude_dir = Path(tmpdir) / "docs" / "plans"
+            claude_dir.mkdir(parents=True)
             test_file = claude_dir / "test-results.json"
             test_file.write_text("\n".join([
                 '{"type": "test", "event": "ok", "name": "test1"}',

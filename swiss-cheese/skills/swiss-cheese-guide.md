@@ -101,7 +101,7 @@ validate-static-analysis:
 Name tests to match requirements for automatic linking:
 - `REQ-001` → `test_req_001_*`
 
-The orchestrator generates `.claude/traceability_matrix.json`:
+The orchestrator generates `docs/plans/traceability_matrix.json`:
 
 ```json
 {
@@ -163,4 +163,4 @@ Runs: make validate-<layer>
 | `design.toml` | Requirements, tasks, gates |
 | `Makefile` | Gate validation targets |
 | `/tmp/swiss_cheese_*.json` | Orchestrator status (internal) |
-| `.claude/traceability_matrix.json` | Final traceability report |
+| `docs/plans/traceability_matrix.json` | Final traceability report |
