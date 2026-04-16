@@ -33,8 +33,6 @@ status = "ready_for_implementation"  # or: "draft", "needs_review"
 [project]
 name = "project-name"
 description = "Brief project description"
-worktree_base = ".worktrees"  # Where task worktrees are created
-
 [[tasks]]
 id = "task-001"
 title = "Short imperative title"
@@ -59,7 +57,6 @@ status = "pending"
 4. **deps**: Array of task IDs that must complete first
 5. **status**: Always start as `pending`
 6. **spec_file**: Optional path to detailed specification
-7. **worktree**: Optional custom worktree path
 
 ## Validation Checklist
 
@@ -78,20 +75,6 @@ Create `docs/plans/tasks.toml` with:
 2. Dependencies correctly mapped
 3. Testable acceptance criteria
 4. Status set to `ready_for_implementation`
-
-## Git Worktree Integration
-
-Each task gets its own git worktree for parallel development:
-
-```bash
-# Worktrees created at: <worktree_base>/<task-id>
-.worktrees/
-├── task-001/
-├── task-002/
-└── task-003/
-```
-
-The `SubagentStop` hook ensures branches are rebased into linear history.
 
 ## Makefile Integration
 

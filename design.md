@@ -53,9 +53,9 @@ Release Package
 - [x] **FR-002.3**: Detect dependency cycles via topological sort
 - [x] **FR-002.4**: Return ready tasks (pending with all deps complete)
 
-### FR-003: Git Worktree Management
-- [x] **FR-003.1**: Detect if current directory is a worktree (`.git` is file, not directory)
-- [x] **FR-003.2**: Get worktree branch name from git
+### ~~FR-003: Git Worktree Management~~ (DEPRECATED)
+- ~~**FR-003.1**: Detect if current directory is a worktree~~ — removed, worktree orchestration out of scope
+- ~~**FR-003.2**: Get worktree branch name from git~~ — removed, worktree orchestration out of scope
 - [x] **FR-003.3**: Determine main branch (main or master fallback)
 - [x] **FR-003.4**: Check if branch is in linear history of main
 
@@ -66,7 +66,7 @@ Release Package
 
 ### FR-005: Subagent Stop Coordination
 - [ ] **FR-005.1**: SubagentStop hook detects task completion
-- [ ] **FR-005.2**: Hook triggers worktree cleanup when branch merged to main
+- ~~**FR-005.2**: Hook triggers worktree cleanup when branch merged to main~~ — DEPRECATED, worktree orchestration out of scope
 - [ ] **FR-005.3**: Hook updates task status in spec file
 
 ### FR-006: Loop Control
@@ -100,8 +100,8 @@ Release Package
 | FR-002.2 | test_hooks.py | TestTaskSpec.test_invalid_dep_reference_fails |
 | FR-002.3 | test_hooks.py | TestTopologicalSort.test_cycle_detected |
 | FR-002.4 | test_hooks.py | TestGetReadyTasks.* |
-| FR-003.1 | test_hooks.py | TestSubagentStopHelpers.test_is_worktree_* |
-| FR-003.2 | test_hooks.py | TestSubagentStopHelpers.test_get_worktree_branch* |
+| ~~FR-003.1~~ | ~~test_hooks.py~~ | ~~DEPRECATED~~ |
+| ~~FR-003.2~~ | ~~test_hooks.py~~ | ~~DEPRECATED~~ |
 | FR-003.3 | test_hooks.py | TestSubagentStopHelpers.test_get_main_branch_* |
 | FR-003.4 | test_hooks.py | TestSubagentStopHelpers.test_branch_*_history_* |
 | FR-004.1 | test_hooks.py | TestVerifyGate.test_run_verify_success |
