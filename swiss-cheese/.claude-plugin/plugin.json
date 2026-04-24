@@ -1,6 +1,6 @@
 {
   "name": "swiss-cheese",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Verified Rust development with 4 layers (Requirements, TDD, Implementation, Verify) and maximum parallelism. Combines defense-in-depth verification with parallel task orchestration.",
   "author": {
     "name": "Swiss Cheese Project",
