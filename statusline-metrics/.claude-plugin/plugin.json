@@ -1,0 +1,9 @@
+{
+  "name": "statusline-metrics",
+  "version": "1.0.0",
+  "description": "Emoji-rich status line surfacing live session metrics: context-window fill %, model + reasoning effort, git branch, lines changed, cost, and rate-limit usage. Includes /statusline-metrics:install to wire it into settings.json (plugins cannot register a status line directly).",
+  "author": {
+    "name": "jvishnefske",
+    "email": "jvishnefske@gmail.com"
+  }
+}

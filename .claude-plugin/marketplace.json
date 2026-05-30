@@ -29,6 +29,17 @@
       },
       "source": "./ultraplan",
       "category": "development"
+    },
+    {
+      "name": "statusline-metrics",
+      "description": "Emoji-rich status line: live context-window fill %, model + reasoning effort, git branch, lines changed, cost, and rate-limit usage. Ships /statusline-metrics:install to wire it into settings.json.",
+      "version": "1.0.0",
+      "author": {
+        "name": "jvishnefske",
+        "email": "jvishnefske@gmail.com"
+      },
+      "source": "./statusline-metrics",
+      "category": "productivity"
     }
   ]
 }
